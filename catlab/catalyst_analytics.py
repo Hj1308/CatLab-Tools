@@ -1,7 +1,7 @@
 # catlab/catalyst_analytics.py
-# CatLab-Tools — Integrated Catalyst & Materials Analysis Suite
+# CatLab-Tools — Catalyst Reaction Analysis Suite
 # Author: Hoda Jafari | github.com/Hj1308
-# Version: 1.0.0
+# Version: 1.1.0
 #
 # Modules:
 #   1. Unit Converter        — ppmS, ppm, mg/L, g/L, mmol/L, mol/L
@@ -10,8 +10,9 @@
 #   4. Conversion Calculator — X(%) profile over time
 #   5. TOF Calculator        — Turnover Frequency (h⁻¹)
 #   6. TOC Removal           — Total Organic Carbon removal (%)
-#   7. BETAnalyser           — BET surface area from N2 physisorption
-#   8. TPlotAnalyser         — T-Plot (Harkins-Jura): micropore/mesopore/macropore %
+#
+# For surface area & pore analysis (BET/BJH/T-Plot):
+#   → see: https://github.com/Hj1308/BET_analyser
 
 import numpy as np
 import pandas as pd
@@ -23,18 +24,17 @@ from typing import Optional
 # ─────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────
-N_AV   = 6.02214076e23   # Avogadro number
-SIGMA  = 0.162e-18       # N2 molecular cross-section (m²)
-V_MOL  = 22414.0         # molar volume at STP (cm³/mol)
-MW_S   = 32.06           # molar mass of sulfur (g/mol)
+MW_S = 32.06   # molar mass of sulfur (g/mol)
+
 
 # ─────────────────────────────────────────
 # 1. UNIT CONVERTER
 # ─────────────────────────────────────────
 def convert_to_mmol_L(value: float, unit: str, mw: Optional[float] = None) -> float:
     """
-    Convert any concentration unit to mmol/L.
-    Supported: mol/L, mmol/L, mg/L, ppm, g/L, ppmS
+    Convert concentration to mmol/L.
+    Supported units: mol/L, mmol/L, mg/L, ppm, g/L, ppmS
+    ppmS auto-converts using MW_S = 32.06 g/mol (sulfur).
     """
     unit = unit.strip()
     if unit == "mol/L":       return value * 1000.0
@@ -55,7 +55,7 @@ def convert_to_mmol_L(value: float, unit: str, mw: Optional[float] = None) -> fl
 @dataclass
 class SampleInfo:
     """
-    Structured experimental metadata for a catalytic reaction.
+    Structured metadata for a catalytic reaction experiment.
     process_type: 'desulfurization' | 'water_treatment' | 'photocatalysis' | 'oxidation' | 'other'
     """
     sample_name          : str
@@ -128,8 +128,9 @@ def calc_toc_removal(toc0: float, toc_t: float) -> float:
 # ─────────────────────────────────────────
 class KineticsAnalyser:
     """
-    Kinetic model fitting: Zero / First / Second / Pseudo-first order.
-    Calculates conversion X(%), rate constants, TOF, and TOC removal.
+    Kinetic model fitting for catalytic reaction data.
+    Supports: Zero / First / Second / Pseudo-first order.
+    Calculates X(%), rate constants, TOF, best-fit model.
     """
     def __init__(self, time: np.ndarray, concentration: np.ndarray, sample_info: SampleInfo):
         self.t    = np.array(time,          dtype=float)
@@ -206,101 +207,5 @@ class KineticsAnalyser:
         plt.suptitle(f"CatLab-Tools | {self.info.sample_name}", fontsize=14, fontweight="bold", y=1.01)
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        plt.close()
-        return save_path
-
-
-# ─────────────────────────────────────────
-# 7. BET ANALYSER
-# ─────────────────────────────────────────
-class BETAnalyser:
-    """
-    BET surface area from N2 physisorption data.
-    BET equation: P/[V(P0-P)] = 1/(Vm·C) + (C-1)/(Vm·C)·(P/P0)
-    """
-    def __init__(self, pressure: np.ndarray, volume_adsorbed: np.ndarray, p0: float = 1.0):
-        self.p  = np.array(pressure,        dtype=float)
-        self.v  = np.array(volume_adsorbed, dtype=float)
-        self.p0 = p0
-
-    def bet_transform(self):
-        x = self.p / self.p0
-        return x, x / (self.v * (1 - x))
-
-    def fit_bet(self, p_min: float = 0.05, p_max: float = 0.35) -> dict:
-        x, y = self.bet_transform()
-        mask = (x >= p_min) & (x <= p_max)
-        slope, intercept, r, *_ = linregress(x[mask], y[mask])
-        c    = 1 + slope / intercept
-        vm   = 1 / (slope + intercept)
-        sbet = (vm * N_AV * SIGMA) / V_MOL
-        return {"Vm_cm3g": round(vm,4), "C_BET": round(c,2), "S_BET_m2g": round(sbet,2),
-                "R2": round(r**2,5), "slope": round(slope,6), "intercept": round(intercept,6)}
-
-
-# ─────────────────────────────────────────
-# 8. T-PLOT ANALYSER
-# ─────────────────────────────────────────
-class TPlotAnalyser:
-    """
-    T-Plot (Harkins-Jura): micropore volume, external SA, pore type distribution.
-    t = sqrt(13.99 / (0.034 - log10(P/P0)))  [Å]
-    """
-    def __init__(self, pressure: np.ndarray, volume_adsorbed: np.ndarray,
-                 s_bet: float, total_pore_volume: float):
-        self.p    = np.array(pressure,        dtype=float)
-        self.v    = np.array(volume_adsorbed, dtype=float)
-        self.sbet = s_bet
-        self.vtot = total_pore_volume
-
-    @staticmethod
-    def harkins_jura_t(p_rel: np.ndarray) -> np.ndarray:
-        return np.sqrt(13.99 / (0.034 - np.log10(p_rel)))
-
-    def fit_tplot(self, t_min: float = 3.5, t_max: float = 5.0) -> dict:
-        t = self.harkins_jura_t(self.p)
-        mask = (t >= t_min) & (t <= t_max)
-        if mask.sum() < 2:
-            t_min, t_max = t.min() + 0.1, t.max() - 0.1
-            mask = (t >= t_min) & (t <= t_max)
-        slope, intercept, r, *_ = linregress(t[mask], self.v[mask])
-        s_ext   = slope * 15.47
-        v_micro = max(intercept * 1e-3 / 1.547, 0.0)
-        return {"S_ext_m2g": round(s_ext,2), "V_micro_cm3g": round(v_micro,4), "R2_tplot": round(r**2,5)}
-
-    def pore_distribution(self, v_micro: float) -> dict:
-        v_meso  = max(self.vtot - v_micro, 0.0)
-        v_macro = 0.0
-        total   = v_micro + v_meso + v_macro
-        if total <= 0: return {"error": "Total pore volume is zero or negative."}
-        return {
-            "V_micro_cm3g" : round(v_micro, 4), "V_meso_cm3g"  : round(v_meso,  4),
-            "V_macro_cm3g" : round(v_macro, 4), "V_total_cm3g" : round(total,   4),
-            "Micropore_%"  : round(100 * v_micro / total, 1),
-            "Mesopore_%"   : round(100 * v_meso  / total, 1),
-            "Macropore_%"  : round(100 * v_macro / total, 1),
-        }
-
-    def full_tplot_report(self) -> dict:
-        fit  = self.fit_tplot()
-        dist = self.pore_distribution(fit["V_micro_cm3g"])
-        return {**fit, **dist}
-
-    def plot_tplot(self, save_path: str = "tplot.png") -> str:
-        t   = self.harkins_jura_t(self.p)
-        res = self.fit_tplot()
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.scatter(t, self.v, color="royalblue", s=45, zorder=5, label="Experimental")
-        t_line    = np.linspace(t.min(), t.max(), 300)
-        slope_val = res["S_ext_m2g"] / 15.47
-        int_val   = res["V_micro_cm3g"] * 1.547e3
-        ax.plot(t_line, slope_val * t_line + int_val, color="crimson", lw=2,
-                label=f"Linear fit  R²={res['R2_tplot']}")
-        ax.set_xlabel("Statistical film thickness  t (Å)", fontsize=12)
-        ax.set_ylabel("Volume adsorbed  (cm³/g STP)",      fontsize=12)
-        ax.set_title("T-Plot Analysis (Harkins-Jura)", fontsize=13, fontweight="bold")
-        ax.legend(); ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=300)
         plt.close()
         return save_path

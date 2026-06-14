@@ -1,4 +1,5 @@
-# CatLab-Tools
+# CatLab-Tools — Catalyst Reaction Analysis Suite
+# BET/BJH/T-Plot → https://github.com/Hj1308/BET_analyser
 from .catalyst_analytics import (
     convert_to_mmol_L,
     SampleInfo,
@@ -6,9 +7,7 @@ from .catalyst_analytics import (
     calc_tof,
     calc_toc_removal,
     KineticsAnalyser,
-    BETAnalyser,
-    TPlotAnalyser,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__  = "Hoda Jafari"
