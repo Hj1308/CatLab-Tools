@@ -1,4 +1,10 @@
 # CatLab-Tools 🔬
+
+![Version](https://img.shields.io/badge/version-v3.0-blue?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
+![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+
 **ODS Calculation Suite — v3.0**  
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
@@ -119,9 +125,11 @@ $$TON = \frac{n_{substrate,\,converted}}{n_{active\,sites}} \qquad TOF\,(h^{-1})
 CatLab-Tools/
 ├── app_ods.py          # Main Streamlit app (v3.0)
 ├── requirements.txt    # numpy, pandas, matplotlib, scipy, openpyxl, streamlit
+├── CHANGELOG.md        # Full version history
 ├── catlab/             # Core Python library modules
 ├── examples/           # Example datasets
-└── tests/              # Unit tests
+├── tests/              # Unit tests
+└── .github/            # GitHub Actions / workflows
 ```
 
 ---
@@ -144,6 +152,8 @@ CatLab-Tools/
 | **v3.0** | L-H kinetic model; k±SE from covariance matrix; r₀ (initial rate); Tab 5 Parameter Effect; Tab 6 Oxidant Efficiency; Tab 7 Condition Comparison |
 | v2.0 | Elovich t½ fix; per-sheet error handling; TOF/TON module; Reusability module |
 | v1.4 | Initial public release |
+
+> Full changelog: [CHANGELOG.md](./CHANGELOG.md)
 
 ---
 
