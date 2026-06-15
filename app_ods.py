@@ -39,10 +39,54 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="ODS Calculation Suite", page_icon="🔬", layout="wide")
 
+# ── Publication-quality plot style (applies to every figure) ──
+plt.rcParams.update({
+    "font.family": "sans-serif",
+    "font.sans-serif": ["DejaVu Sans"],
+    "font.size": 12,
+    "axes.labelsize": 13,
+    "axes.titlesize": 13,
+    "axes.titleweight": "bold",
+    "axes.linewidth": 1.2,
+    "axes.edgecolor": "black",
+    "axes.spines.top": True,
+    "axes.spines.right": True,
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.top": True,
+    "ytick.right": True,
+    "xtick.major.size": 5,
+    "ytick.major.size": 5,
+    "xtick.major.width": 1.1,
+    "ytick.major.width": 1.1,
+    "xtick.minor.visible": True,
+    "ytick.minor.visible": True,
+    "xtick.minor.size": 2.5,
+    "ytick.minor.size": 2.5,
+    "legend.frameon": False,
+    "legend.fontsize": 10,
+    "lines.linewidth": 1.8,
+    "lines.markersize": 7,
+    "axes.grid": False,
+    "figure.dpi": 120,
+    "savefig.dpi": 300,
+    "savefig.bbox": "tight",
+})
+
 MW_S = 32.06
 COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
            "#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
 MARKERS = ["o","s","^","D","v","P","*","X","h"]
+
+# Common ODS/ODN substrates with molecular weight (g/mol), for C0 unit conversion
+SUBSTRATES = {
+    "DBT (Dibenzothiophene)":        184.26,
+    "BT (Benzothiophene)":           134.20,
+    "4,6-DMDBT":                     212.31,
+    "4-MDBT":                        198.28,
+    "Thiophene":                     84.14,
+    "Custom / other":                None,
+}
 
 
 # ════════════════════════════════════════════════════════════════
@@ -288,7 +332,7 @@ def _fit_nonlinear(time, Ct, C0):
 
 
 def _plot_model(fits_all, sheets, model_name, ylabel, title):
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(8.5, 5.2))
     for i, sheet in enumerate(sheets):
         f = fits_all[sheet]
         res = f["fits"].get(model_name, {})
@@ -296,11 +340,12 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             continue
         t = f["t"]; Ct = f["Ct"]
         c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
-        lbl = f"{sheet} R²={res['R2']:.4f}"
+        lbl = f"{sheet}  (R²={res['R2']:.4f}"
         if res.get("is_best"):
-            lbl += " ★best"
-        ax.scatter(t, Ct, color=c, marker=m, s=60, zorder=3,
-                   edgecolors="white", linewidths=0.6)
+            lbl += ", best"
+        lbl += ")"
+        ax.scatter(t, Ct, color=c, marker=m, s=75, zorder=3,
+                   edgecolors="black", linewidths=0.7)
         t_fit = np.linspace(0, t[-1], 300)
         if model_name == "Zero-order":
             pred_fit = _zero_order(t_fit, *res["params"])
@@ -312,18 +357,17 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             pred_fit = _lh_model(t_fit, *res["params"])
         else:
             pred_fit = _elovich(t_fit, *res["params"])
-        ax.plot(t_fit, pred_fit, "--", color=c, lw=1.5, alpha=0.8, label=lbl)
+        ax.plot(t_fit, pred_fit, "-", color=c, lw=2, zorder=2, label=lbl)
 
         th = res.get("t_half", float("nan"))
         if res.get("is_best") and not np.isnan(th) and not np.isinf(th) and 0 < th <= t[-1] * 1.5:
-            ax.axvline(th, color=c, ls=":", lw=1.2, alpha=0.7)
-            ax.annotate("t½", xy=(th, ax.get_ylim()[1]*0.95), color=c,
-                         fontsize=9, ha="center", fontweight="bold")
+            ax.axvline(th, color=c, ls=":", lw=1.3, alpha=0.8, zorder=1)
 
-    ax.set_xlabel("Time (min)", fontsize=12)
-    ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    ax.set_xlabel("Time (min)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.margins(x=0.03, y=0.08)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0)
     plt.tight_layout()
     return fig
 
@@ -336,7 +380,7 @@ def _linreg_r2(x, y):
 
 
 def _plot_linearization(fits_all, sheets, C0_mol, transform, ylabel, title):
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(8.5, 5.2))
     lin_results = {}
     for i, sheet in enumerate(sheets):
         f = fits_all[sheet]
@@ -345,15 +389,16 @@ def _plot_linearization(fits_all, sheets, C0_mol, transform, ylabel, title):
         slope, intercept, r2v = _linreg_r2(t, y)
         lin_results[sheet] = (slope, intercept, r2v)
         c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
-        ax.scatter(t, y, color=c, marker=m, s=60, zorder=3,
-                   edgecolors="white", linewidths=0.6)
+        ax.scatter(t, y, color=c, marker=m, s=75, zorder=3,
+                   edgecolors="black", linewidths=0.7)
         t_fit = np.array([0, t[-1]])
-        ax.plot(t_fit, slope*t_fit + intercept, "--", color=c, lw=1.5, alpha=0.8,
-                label=f"{sheet} R²={r2v:.4f}")
-    ax.set_xlabel("Time (min)", fontsize=12)
-    ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+        ax.plot(t_fit, slope*t_fit + intercept, "-", color=c, lw=2, zorder=2,
+                label=f"{sheet}  (R²={r2v:.4f})")
+    ax.set_xlabel("Time (min)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.margins(x=0.03, y=0.08)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0)
     plt.tight_layout()
     return fig, lin_results
 
@@ -518,18 +563,37 @@ st.markdown("---")
 
 with st.sidebar:
     st.header("⚙️ Global Parameters")
-    c0_val = st.number_input("C₀ (initial DBT concentration)", value=250.0, min_value=0.0001)
+
+    substrate = st.selectbox("Substrate / pollutant", list(SUBSTRATES.keys()), index=0,
+                              help="Used to look up the molecular weight for "
+                                   "ppm/mg·L⁻¹/g·L⁻¹ → mol·L⁻¹ conversion. "
+                                   "Select 'Custom / other' to enter your own MW.")
+    mw_default = SUBSTRATES[substrate] if SUBSTRATES[substrate] is not None else 184.26
+    mw_poll = st.number_input("Molecular weight (g/mol)", value=float(mw_default),
+                               min_value=1.0, step=0.01,
+                               help="Auto-filled from the substrate above; "
+                                    "edit freely if your value differs.")
+
+    c0_val = st.number_input("C₀ (initial concentration)", value=250.0, min_value=0.0001)
     c0_unit = st.selectbox("C₀ unit", ["ppmS", "ppm", "mg/L", "g/L", "mmol/L", "mol/L"])
-    mw_poll = None
-    if c0_unit in ("ppm", "mg/L", "g/L"):
-        mw_poll = st.number_input("MW of pollutant (g/mol)", value=184.0, min_value=1.0,
-                                   help="MW of DBT ≈ 184.26 g/mol")
+    # ppmS uses the fixed sulfur MW; the other mass-based units use the
+    # substrate MW selected above
+    mw_for_conversion = MW_S if c0_unit == "ppmS" else mw_poll
     try:
-        C0_mol = _to_mol_L(c0_val, c0_unit, mw_poll)
+        C0_mol = _to_mol_L(c0_val, c0_unit, mw_for_conversion)
         st.caption(f"C₀ = {_fmt_sci(C0_mol)} mol/L")
     except Exception as e:
         C0_mol = None
         st.error(f"Unit error: {e}")
+
+    st.markdown("**Reaction conditions** (used for mass-normalized rate &amp; figure captions)")
+    cat_mass_mg = st.number_input("Catalyst mass (mg)", value=20.0, min_value=0.0, step=1.0)
+    fuel_vol_ml = st.number_input("Fuel / model-oil volume (mL)", value=5.0, min_value=0.0, step=0.5)
+    cat_mass_g = cat_mass_mg / 1000.0
+    fuel_vol_L = fuel_vol_ml / 1000.0
+    conditions_caption = (f"{substrate.split(' (')[0]}, C₀={c0_val:g} {c0_unit}, "
+                           f"{cat_mass_mg:g} mg catalyst, {fuel_vol_ml:g} mL fuel")
+    st.caption(conditions_caption)
 
 (tab_templates, tab_kinetics, tab_tof, tab_reuse,
  tab_param, tab_oxeff, tab_compare) = st.tabs([
@@ -700,6 +764,12 @@ with tab_kinetics:
                             # r₀ (NEW)
                             "r₀ (mol/L/min)":        best_res.get("r0", float("nan")),
                             "r₀_SE":                 best_res.get("r0_se", float("nan")),
+                            # mass-normalized r₀ (NEW): activity per gram of catalyst,
+                            # using the global catalyst mass set in the sidebar
+                            "r₀/m (mol/g/min)":      (best_res.get("r0", float("nan")) / cat_mass_g
+                                                       if cat_mass_g > 0 else float("nan")),
+                            "r₀/m_SE":               (best_res.get("r0_se", float("nan")) / cat_mass_g
+                                                       if cat_mass_g > 0 else float("nan")),
                         })
                     except Exception as e:
                         errors.append((sheet, str(e)))
@@ -712,20 +782,22 @@ with tab_kinetics:
                     summary = pd.DataFrame(rows)
 
                     st.markdown("### 📈 Plots")
-                    fig0, ax0 = plt.subplots(figsize=(9, 5))
+                    fig0, ax0 = plt.subplots(figsize=(8.5, 5.2))
                     for i, sheet in enumerate(fits_all):
                         f = fits_all[sheet]
                         ax0.plot(f["t"], (1 - f["Ct"]/C0_mol)*100,
                                  marker=MARKERS[i % len(MARKERS)],
                                  color=COLORS[i % len(COLORS)],
                                  label=sheet, lw=2, ms=8,
-                                 markeredgecolor="white", markeredgewidth=0.7)
-                    ax0.set_xlabel("Time (min)", fontsize=12)
-                    ax0.set_ylabel("Removal (%)", fontsize=12)
-                    ax0.set_title("ODS Performance — All Catalysts", fontsize=13, fontweight="bold")
-                    ax0.legend(fontsize=9); ax0.grid(True, alpha=0.3)
+                                 markeredgecolor="black", markeredgewidth=0.7)
+                    ax0.set_xlabel("Time (min)")
+                    ax0.set_ylabel("Removal (%)")
+                    ax0.set_title("ODS Performance — All Catalysts")
+                    ax0.margins(x=0.03, y=0.08)
+                    ax0.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0)
                     plt.tight_layout()
                     st.pyplot(fig0)
+                    st.caption(f"Reaction conditions: {conditions_caption}")
 
                     sheets_ok = list(fits_all.keys())
                     fig1 = _plot_model(fits_all, sheets_ok, "Zero-order",
@@ -777,7 +849,7 @@ with tab_kinetics:
                     ax_r0.set_ylabel("r₀ (mol·L⁻¹·min⁻¹)", fontsize=12)
                     ax_r0.set_title("Initial Reaction Rate r₀ per Catalyst", fontsize=13, fontweight="bold")
                     ax_r0.tick_params(axis="x", rotation=30)
-                    ax_r0.grid(True, alpha=0.3, axis="y")
+                    ax_r0.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                     plt.tight_layout()
                     st.pyplot(fig_r0)
 
@@ -790,17 +862,25 @@ with tab_kinetics:
                     disp["α ± SE"]     = disp.apply(lambda r: _fmt_pm(r["Elovich α"], r["Elovich α_SE"]), axis=1)
                     disp["kLH ± SE"]   = disp.apply(lambda r: _fmt_pm(r["kLH (1/min)"], r["kLH_SE"]), axis=1)
                     disp["r₀ ± SE"]    = disp.apply(lambda r: _fmt_pm(r["r₀ (mol/L/min)"], r["r₀_SE"]), axis=1)
+                    disp["r₀/m ± SE"]  = disp.apply(lambda r: _fmt_pm(r["r₀/m (mol/g/min)"], r["r₀/m_SE"]), axis=1)
                     for col in ["R2_zero","R2_first","R2_second","R2_elovich","R2_LH","Best R2",
                                 "R2_first_lin","R2_second_lin"]:
                         disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if v != -999 else "—")
+                    for col in ["Kapp_lin (1/min)", "K2_lin (L/mol/min)"]:
+                        disp[col] = disp[col].apply(_fmt_sci)
                     disp["t½ (min)"] = disp["t½ (min)"].apply(_fmt_thalf)
                     disp["K_ads (L/mol)"] = disp["K_ads (L/mol)"].apply(_fmt_sci)
                     show_cols = ["Catalyst","X_final (%)","K0 ± SE","R2_zero",
                                  "Kapp ± SE","R2_first","K2 ± SE","R2_second",
                                  "α ± SE","R2_elovich","kLH ± SE","R2_LH",
                                  "Reaction Order","Best Model","Best R2","t½ (min)",
-                                 "r₀ ± SE","Kapp_lin (1/min)","R2_first_lin",
+                                 "r₀ ± SE","r₀/m ± SE","Kapp_lin (1/min)","R2_first_lin",
                                  "K2_lin (L/mol/min)","R2_second_lin"]
+                    st.caption(f"Reaction conditions: {conditions_caption}. "
+                               f"r₀/m = r₀ ÷ catalyst mass (set in sidebar), "
+                               f"i.e. mol DBT converted per gram of catalyst per minute "
+                               f"at t→0 - a model-independent, mass-based activity metric "
+                               f"that doesn't require the active-site loading needed for TOF.")
                     st.dataframe(disp[show_cols], use_container_width=True)
 
                     st.markdown("### ⬇️ Download Results")
@@ -897,7 +977,7 @@ with tab_tof:
                         axB.set_title("TOF (h⁻¹)", fontweight="bold"); axB.set_ylabel("TOF (h⁻¹)")
                         axB.tick_params(axis="x", rotation=30)
                         for ax in (axA, axB):
-                            ax.grid(True, alpha=0.3, axis="y")
+                            ax.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                         plt.tight_layout()
                         st.pyplot(fig)
                         tbl_buf = io.BytesIO()
@@ -969,7 +1049,8 @@ with tab_reuse:
                     ax.set_ylabel("Removal (%)", fontsize=12)
                     ax.set_title("Catalyst Reusability", fontsize=13, fontweight="bold")
                     ax.set_xticks(sorted(set(np.concatenate([d["cycle"] for d in data_ok.values()]))))
-                    ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+                    ax.legend(fontsize=9)
+                    ax.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                     plt.tight_layout()
                     st.pyplot(fig)
                     st.dataframe(result, use_container_width=True)
@@ -1036,7 +1117,8 @@ with tab_param:
                         ax_p.set_ylabel(metric_label, fontsize=12)
                         ax_p.set_title(f"Effect of {param_col} on {metric_label}",
                                         fontsize=13, fontweight="bold")
-                        ax_p.legend(fontsize=9); ax_p.grid(True, alpha=0.3)
+                        ax_p.legend(fontsize=9)
+                        ax_p.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                         plt.tight_layout()
                         st.pyplot(fig_p)
                         all_figs_param.append((psheet, fig_p))
@@ -1112,7 +1194,8 @@ Upload the **Oxidant Efficiency template** (from Tab 1) with columns:
                         ax_ox.set_ylabel("η H₂O₂ (%)", fontsize=12)
                         ax_ox.set_title("H₂O₂ Oxidant Efficiency per Catalyst", fontsize=13, fontweight="bold")
                         ax_ox.tick_params(axis="x", rotation=30)
-                        ax_ox.legend(fontsize=9); ax_ox.grid(True, alpha=0.3, axis="y")
+                        ax_ox.legend(fontsize=9)
+                        ax_ox.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                         plt.tight_layout()
                         st.pyplot(fig_ox)
 
@@ -1166,6 +1249,7 @@ with tab_compare:
                 df_c["__condition__"] = lbl
                 dfs_cond.append(df_c)
 
+            # find the metric column — handle both v2 and v3 column names
             col_map = {
                 "t½ (min)": "t½ (min)",
                 "Best R2":  "Best R2",
@@ -1173,6 +1257,7 @@ with tab_compare:
             }
             metric_col = col_map[metric_cmp]
 
+            # check metric column exists in all files
             missing_metric = [condition_labels[i] for i, df_c in enumerate(dfs_cond)
                                if metric_col not in df_c.columns]
             if missing_metric:
@@ -1188,6 +1273,7 @@ with tab_compare:
                 combined = pd.concat(dfs_cond, ignore_index=True)
                 catalysts_all = combined["Catalyst"].unique().tolist()
 
+                # pivot: rows = catalysts, columns = conditions
                 pivot = combined.pivot_table(index="Catalyst", columns="__condition__",
                                               values=metric_col, aggfunc="first")
                 pivot = pivot.reindex(columns=condition_labels)
@@ -1195,6 +1281,7 @@ with tab_compare:
                 st.markdown(f"### 📋 {metric_cmp} — All Conditions")
                 st.dataframe(pivot.style.format("{:.3f}", na_rep="—"), use_container_width=True)
 
+                # Grouped bar chart
                 fig_cmp, ax_cmp = plt.subplots(figsize=(max(9, len(catalysts_all)*1.5), 5))
                 x_pos = np.arange(len(catalysts_all))
                 bar_w = 0.8 / len(condition_labels)
@@ -1209,7 +1296,8 @@ with tab_compare:
                 ax_cmp.set_xticklabels(catalysts_all, rotation=30, ha="right")
                 ax_cmp.set_ylabel(metric_cmp, fontsize=12)
                 ax_cmp.set_title(f"{metric_cmp} Comparison Across Conditions", fontsize=13, fontweight="bold")
-                ax_cmp.legend(fontsize=9); ax_cmp.grid(True, alpha=0.3, axis="y")
+                ax_cmp.legend(fontsize=9)
+                ax_cmp.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                 plt.tight_layout()
                 st.pyplot(fig_cmp)
 
