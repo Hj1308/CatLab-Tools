@@ -4,17 +4,23 @@ ODS Calculation Suite — Streamlit Web App
 Extended build based on CatLab-Tools/app_ods.py (github.com/Hj1308/CatLab-Tools)
 Original author: Hoda Jafari
 
-v2.1 — bug-fixes on top of v2.0
+v2.0 — additions & fixes on top of v1.4
 ----------------------------------------
-FIXED : Sheet names in Excel templates are now sanitised before writing:
-        characters illegal in Excel sheet names ( \\ / ? * [ ] : )
-        are replaced with underscores, leading/trailing spaces and
-        apostrophes are stripped, and the result is capped at 31 chars.
-        Previously a name like "Fe₂O₃/SiO₂" crashed openpyxl with
-        ValueError on wks.title.
-FIXED : Catalyst mass and Fuel volume inputs removed from the Kinetics tab
-        (they belong only in the TOF/TON tab; the Kinetics engine does not
-        need them).
+FIXED : Elovich model now has a real t1/2 formula (was hard-coded to NaN,
+        so whenever Elovich was the best-fit model — common for
+        chemisorption-controlled kinetics — t1/2 showed "N/A").
+FIXED : Each catalyst sheet is processed in its own try/except block with
+        clear, specific error messages (wrong number of columns, not enough
+        valid rows, non-numeric cells, ...). One bad sheet no longer wipes
+        out the entire report.
+FIXED : Sheet names sanitised before writing to Excel
+        (_safe_sheet_name with uniqueness tracking).
+NEW   : TOF / TON module (turnover frequency / turnover number from
+        catalyst mass + active-site loading).
+NEW   : Reusability / recyclability module (removal % retained over reuse
+        cycles).
+NEW   : Reaction Order (1st/2nd) column in kinetics summary.
+NEW   : Info message shown when catalyst sheet names are adjusted for Excel.
 """
 
 import streamlit as st
@@ -30,7 +36,7 @@ import zipfile
 import warnings
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="ODS Calculation Suite", page_icon="\U0001f52c", layout="wide")
+st.set_page_config(page_title="ODS Calculation Suite", page_icon="🔬", layout="wide")
 
 MW_S = 32.06
 COLORS = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
@@ -40,14 +46,6 @@ MARKERS = ["o","s","^","D","v","P","*","X","h"]
 # ════════════════════════════════════════════════════════════════
 # SHARED HELPERS
 # ════════════════════════════════════════════════════════════════
-_INVALID_SHEET_CHARS = re.compile(r'[\\/*?\[\]:]')
-
-def _safe_sheet_name(name: str) -> str:
-    """Return an Excel-legal sheet name (max 31 chars, no illegal chars)."""
-    name = _INVALID_SHEET_CHARS.sub("_", name)
-    name = name.strip(" '")          # strip leading/trailing spaces & apostrophes
-    return name[:31] if name else "Sheet"
-
 def _to_mol_L(value, unit, mw=None):
     unit = unit.strip()
     if unit == "mol/L":
@@ -91,12 +89,13 @@ def _elovich_t_half(C0, alpha, beta):
     Solve C(t1/2) = C0/2 for the Elovich model
     C(t) = C0 - (1/beta) * ln(1 + alpha*beta*t)
     => t1/2 = (exp(C0*beta/2) - 1) / (alpha*beta)
+    This was previously hard-coded to NaN in v1.4.
     """
     try:
         if alpha <= 0 or beta <= 0 or C0 <= 0:
             return float("nan")
         exponent = C0 * beta / 2.0
-        if exponent > 700:
+        if exponent > 700:  # avoid exp() overflow
             return float("inf")
         val = np.exp(exponent) - 1.0
         if val <= 0:
@@ -111,17 +110,17 @@ def _fmt_sci(val):
     if val == 0:
         return "0"
     if np.isinf(val):
-        return "\u221e"
+        return "∞"
     exp = int(np.floor(np.log10(abs(val))))
     coef = val / (10 ** exp)
-    sup = str.maketrans("0123456789-", "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207b")
-    return f"{coef:.2f} \u00d7 10{str(exp).translate(sup)}"
+    sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    return f"{coef:.2f} × 10{str(exp).translate(sup)}"
 
 def _fmt_thalf(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "N/A"
     if np.isinf(val):
-        return "\u226b range"
+        return "≫ range"
     if val > 1e5:
         return _fmt_sci(val)
     return f"{val:.2f}"
@@ -140,8 +139,8 @@ def _fit_nonlinear(time, Ct, C0):
         k0 = p[0]
         results["Zero-order"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k\u2080 = {_fmt_sci(k0)} mol\u00b7L\u207b\u00b9\u00b7min\u207b\u00b9",
-            "t_half": round(0.5 * C0 / k0, 2) if k0 > 0 else float("nan"),
+            "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+            "t_half": round(0.5 * p[1] / k0, 2) if k0 > 0 else float("nan"),
             "k": k0, "col_k": "K0 (mol/L/min)",
         }
     except Exception as e:
@@ -155,7 +154,7 @@ def _fit_nonlinear(time, Ct, C0):
         kapp = p[0]
         results["Pseudo-first"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k\u2090\u209a\u209a = {_fmt_sci(kapp)} min\u207b\u00b9",
+            "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
             "t_half": round(np.log(2) / kapp, 2) if kapp > 0 else float("nan"),
             "k": kapp, "col_k": "Kapp (1/min)",
         }
@@ -170,21 +169,21 @@ def _fit_nonlinear(time, Ct, C0):
         k2 = p[0]
         results["Second-order"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k\u2082 = {_fmt_sci(k2)} L\u00b7mol\u207b\u00b9\u00b7min\u207b\u00b9",
-            "t_half": round(1.0 / (k2 * C0), 2) if k2 > 0 else float("nan"),
+            "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+            "t_half": round(1.0 / (k2 * p[1]), 2) if k2 > 0 else float("nan"),
             "k": k2, "col_k": "K2 (L/mol/min)",
         }
     except Exception as e:
         results["Second-order"] = {"R2": -999, "error": str(e)}
 
-    # Elovich
+    # Elovich (t1/2 now computed instead of hard-coded NaN)
     try:
-        if len(t) < 3:
-            raise ValueError("Elovich needs at least 3 time points "
-                             "(including t=0) to fit 2 parameters")
+        if len(t) < 2:
+            raise ValueError("Elovich needs at least 2 time points "
+                             "to fit 2 parameters")
         p, _ = curve_fit(
             lambda tt, a, b: _elovich(tt, a, b, C0),
-            t[1:], Ct[1:],
+            t, Ct,
             p0=[1e-4, 1e4],
             bounds=([1e-10, 1e-3], [1e3, 1e10]),
             maxfev=10000
@@ -193,9 +192,9 @@ def _fit_nonlinear(time, Ct, C0):
         pred_full = _elovich(t, alpha, beta, C0)
         results["Elovich"] = {
             "params": (alpha, beta, C0), "R2": _r2(Ct, pred_full), "pred": pred_full,
-            "label": f"\u03b1={_fmt_sci(alpha)}, \u03b2={_fmt_sci(beta)}",
+            "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
             "t_half": _elovich_t_half(C0, alpha, beta),
-            "k": alpha, "beta": beta, "col_k": "\u03b1 (mol/L/min)",
+            "k": alpha, "beta": beta, "col_k": "α (mol/L/min)",
         }
     except Exception as e:
         results["Elovich"] = {"R2": -999, "error": str(e)}
@@ -214,9 +213,9 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             continue
         t = f["t"]; Ct = f["Ct"]
         c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
-        lbl = f"{sheet} R\u00b2={res['R2']:.4f}"
+        lbl = f"{sheet} R²={res['R2']:.4f}"
         if res.get("is_best"):
-            lbl += " \u2605best"
+            lbl += " ★best"
         ax.scatter(t, Ct, color=c, marker=m, s=60, zorder=3,
                    edgecolors="white", linewidths=0.6)
         t_fit = np.linspace(0, t[-1], 300)
@@ -226,14 +225,15 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             pred_fit = _first_order(t_fit, *res["params"])
         elif model_name == "Second-order":
             pred_fit = _second_order(t_fit, *res["params"])
-        else:
+        else:  # Elovich
             pred_fit = _elovich(t_fit, *res["params"])
         ax.plot(t_fit, pred_fit, "--", color=c, lw=1.5, alpha=0.8, label=lbl)
 
+        # mark t1/2 on the curve if it falls within (or near) the data range
         th = res.get("t_half", float("nan"))
         if res.get("is_best") and not np.isnan(th) and not np.isinf(th) and 0 < th <= t[-1] * 1.5:
             ax.axvline(th, color=c, ls=":", lw=1.2, alpha=0.7)
-            ax.annotate("t\u00bd", xy=(th, ax.get_ylim()[1]*0.95), color=c,
+            ax.annotate("t½", xy=(th, ax.get_ylim()[1]*0.95), color=c,
                         fontsize=9, ha="center", fontweight="bold")
 
     ax.set_xlabel("Time (min)", fontsize=12)
@@ -244,8 +244,27 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
     return fig
 
 # ════════════════════════════════════════════════════════════════
-# TEMPLATE BUILDERS  (all use _safe_sheet_name)
+# TEMPLATE BUILDERS
 # ════════════════════════════════════════════════════════════════
+def _safe_sheet_name(name, used):
+    """
+    Turn a catalyst name into a valid, unique Excel sheet name.
+    Excel sheet names cannot contain \\ / ? * [ ] : , cannot be empty,
+    cannot exceed 31 characters, and must be unique within the workbook.
+    e.g. "g-BSiC/B4C" -> "g-BSiC-B4C", "N,B-gSiC/h-BN" -> "N,B-gSiC-h-BN"
+    """
+    safe = re.sub(r'[\\/?*\[\]:]', '-', str(name)).strip(" '")
+    if not safe:
+        safe = "Sheet"
+    safe = safe[:31]
+    base, i = safe, 2
+    while safe in used:
+        suffix = f"_{i}"
+        safe = base[:31 - len(suffix)] + suffix
+        i += 1
+    used.add(safe)
+    return safe
+
 def make_kinetics_template(names):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
@@ -264,11 +283,15 @@ def make_kinetics_template(names):
             "Removal (%)": [0, 18, 32, 50, 64, 78, 88],
         })
         example.to_excel(w, sheet_name="Example", index=False)
+        used = {"Instructions", "Example"}
+        mapping = {}
         for name in names:
+            safe = _safe_sheet_name(name, used)
+            mapping[name] = safe
             pd.DataFrame({"Time (min)": [None]*6, "Removal (%)": [None]*6}
-                         ).to_excel(w, sheet_name=_safe_sheet_name(name), index=False)
+                         ).to_excel(w, sheet_name=safe, index=False)
     buf.seek(0)
-    return buf
+    return buf, mapping
 
 def make_reusability_template(names, n_cycles=5):
     buf = io.BytesIO()
@@ -289,12 +312,16 @@ def make_reusability_template(names, n_cycles=5):
             "Removal (%)": [92, 88, 83, 77, 70][:n_cycles],
         })
         example.to_excel(w, sheet_name="Example", index=False)
+        used = {"Instructions", "Example"}
+        mapping = {}
         for name in names:
+            safe = _safe_sheet_name(name, used)
+            mapping[name] = safe
             pd.DataFrame({"Cycle": list(range(1, n_cycles+1)),
                           "Removal (%)": [None]*n_cycles}
-                         ).to_excel(w, sheet_name=_safe_sheet_name(name), index=False)
+                         ).to_excel(w, sheet_name=safe, index=False)
     buf.seek(0)
-    return buf
+    return buf, mapping
 
 def make_tof_template(names):
     buf = io.BytesIO()
@@ -330,30 +357,31 @@ def make_tof_template(names):
 # ════════════════════════════════════════════════════════════════
 # UI
 # ════════════════════════════════════════════════════════════════
-st.title("\U0001f52c ODS Calculation Suite")
+st.title("🔬 ODS Calculation Suite")
 st.markdown(
-    "**CatLab-Tools (extended)** \u2014 based on the work of Hoda Jafari \u00b7 "
+    "**CatLab-Tools (extended)** — based on the work of Hoda Jafari · "
     "[GitHub](https://github.com/Hj1308/CatLab-Tools)"
 )
 st.markdown("---")
 
+# ---- Global parameters (shared by Kinetics & TOF/TON) ----
 with st.sidebar:
-    st.header("\u2699\ufe0f Global Parameters")
-    c0_val = st.number_input("C\u2080 (initial DBT concentration)", value=250.0, min_value=0.0001)
-    c0_unit = st.selectbox("C\u2080 unit", ["ppmS", "ppm", "mg/L", "g/L", "mmol/L", "mol/L"])
+    st.header("⚙️ Global Parameters")
+    c0_val = st.number_input("C₀ (initial DBT concentration)", value=250.0, min_value=0.0001)
+    c0_unit = st.selectbox("C₀ unit", ["ppmS", "ppm", "mg/L", "g/L", "mmol/L", "mol/L"])
     mw_poll = None
     if c0_unit in ("ppm", "mg/L", "g/L"):
         mw_poll = st.number_input("MW of pollutant (g/mol)", value=184.0, min_value=1.0,
-                                  help="MW of DBT \u2248 184.26 g/mol")
+                                  help="MW of DBT ≈ 184.26 g/mol")
     try:
         C0_mol = _to_mol_L(c0_val, c0_unit, mw_poll)
-        st.caption(f"C\u2080 = {_fmt_sci(C0_mol)} mol/L")
+        st.caption(f"C₀ = {_fmt_sci(C0_mol)} mol/L")
     except Exception as e:
         C0_mol = None
         st.error(f"Unit error: {e}")
 
 tab_templates, tab_kinetics, tab_tof, tab_reuse = st.tabs(
-    ["\U0001f4e5 1. Templates", "\U0001f4ca 2. Kinetics & t\u00bd", "\u2699\ufe0f 3. TOF / TON", "\u267b\ufe0f 4. Reusability"]
+    ["📥 1. Templates", "📊 2. Kinetics & t½", "⚙️ 3. TOF / TON", "♻️ 4. Reusability"]
 )
 
 # ────────────────────────────────────────────────────────────
@@ -376,25 +404,38 @@ with tab_templates:
     if not names:
         st.warning("Please enter at least one catalyst name.")
     else:
+        kin_buf, kin_map = make_kinetics_template(names)
+        reuse_buf, reuse_map = make_reusability_template(names, int(n_cycles))
+
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.download_button("\U0001f4e5 Kinetics template (X% + t\u00bd)",
-                               data=make_kinetics_template(names),
+            st.download_button("📥 Kinetics template (X% + t½)",
+                               data=kin_buf,
                                file_name="ods_kinetics_template.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         with c2:
-            st.download_button("\U0001f4e5 TOF/TON template",
+            st.download_button("📥 TOF/TON template",
                                data=make_tof_template(names),
                                file_name="ods_tof_ton_template.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         with c3:
-            st.download_button("\U0001f4e5 Reusability template",
-                               data=make_reusability_template(names, int(n_cycles)),
+            st.download_button("📥 Reusability template",
+                               data=reuse_buf,
                                file_name="ods_reusability_template.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+        changed = {k: v for k, v in kin_map.items() if k != v}
+        if changed:
+            st.info(
+                "ℹ️ Excel sheet names can't contain `\\ / ? * [ ] :` , so the "
+                "following catalyst names were adjusted for the sheet tabs "
+                "(this is cosmetic only - your results table will still show "
+                "this sheet name as the 'Catalyst'):\n\n" +
+                "\n".join(f"- `{k}` → `{v}`" for k, v in changed.items())
+            )
+
     st.markdown("---")
-    with st.expander("\U0001f4d0 Formulas used in this app"):
+    with st.expander("📐 Formulas used in this app"):
         st.markdown(r"""
 **Removal / conversion**
 $$X(\%) = \dfrac{C_0 - C_t}{C_0}\times 100$$
@@ -422,7 +463,7 @@ $$\text{Retention}(\%) = \dfrac{X_{cycle\,n}}{X_{cycle\,1}}\times 100$$
 # TAB 2 — KINETICS & t1/2
 # ────────────────────────────────────────────────────────────
 with tab_kinetics:
-    st.subheader("Kinetics fitting (Zero / Pseudo-first / Second-order / Elovich) + t\u00bd")
+    st.subheader("Kinetics fitting (Zero / Pseudo-first / Second-order / Elovich) + t½")
     uploaded = st.file_uploader("Upload filled Kinetics template", type=["xlsx", "xls"],
                                 key="kin_upl")
 
@@ -452,7 +493,7 @@ with tab_kinetics:
                         if len(df) < 2:
                             raise ValueError(
                                 f"only {len(df)} valid data row(s) after removing "
-                                f"empty rows - need at least 2 (ideally >=4)")
+                                f"empty rows - need at least 2 (ideally ≥4)")
                         df.columns = ["Time (min)", "Removal (%)"]
                         try:
                             t_arr = df["Time (min)"].values.astype(float)
@@ -464,13 +505,25 @@ with tab_kinetics:
                         t_arr, rem = t_arr[order], rem[order]
 
                         Ct_arr = C0_mol * (1.0 - rem)
-                        if t_arr[0] != 0:
-                            t_arr = np.insert(t_arr, 0, 0.0)
-                            Ct_arr = np.insert(Ct_arr, 0, C0_mol)
+                        # NOTE: we do NOT force the curve through (t=0, C0).
+                        # If t=0 was not actually measured, fabricating that
+                        # point distorts the fit for fast-reacting catalysts
+                        # (forces an artificial "kink") and can flip the
+                        # pseudo-first vs second-order classification.
+                        # C0 is instead left as a free fitted parameter
+                        # (bounded to 0.5-1.5x the nominal C0).
 
                         fits = _fit_nonlinear(t_arr, Ct_arr, C0_mol)
                         fits_all[sheet] = {"t": t_arr, "Ct": Ct_arr, "fits": fits}
                         best = max(fits, key=lambda m: fits[m]["R2"])
+
+                        # Classic pseudo-first vs second-order classification
+                        # (the comparison used in the thesis methodology,
+                        # independent of zero-order/Elovich):
+                        r1 = fits["Pseudo-first"]["R2"]
+                        r2v = fits["Second-order"]["R2"]
+                        order_label = "Second-order" if r2v > r1 else "Pseudo-first-order"
+
                         rows.append({
                             "Catalyst": sheet,
                             "X_final (%)": round(rem[-1]*100, 1),
@@ -480,24 +533,25 @@ with tab_kinetics:
                             "R2_first": fits["Pseudo-first"]["R2"],
                             "K2 (L/mol/min)": fits["Second-order"].get("k", float("nan")),
                             "R2_second": fits["Second-order"]["R2"],
-                            "Elovich alpha": fits["Elovich"].get("k", float("nan")),
-                            "Elovich beta": fits["Elovich"].get("beta", float("nan")),
+                            "Elovich α": fits["Elovich"].get("k", float("nan")),
+                            "Elovich β": fits["Elovich"].get("beta", float("nan")),
                             "R2_elovich": fits["Elovich"]["R2"],
+                            "Reaction Order (1st/2nd)": order_label,
                             "Best Model": best,
                             "Best R2": fits[best]["R2"],
-                            "t_half (min)": fits[best].get("t_half", float("nan")),
+                            "t½ (min)": fits[best].get("t_half", float("nan")),
                         })
                     except Exception as e:
                         errors.append((sheet, str(e)))
 
                 if errors:
                     msg = "\n".join(f"- **{s}**: {m}" for s, m in errors)
-                    st.warning("\u26a0\ufe0f Some sheets were skipped due to data problems:\n\n" + msg)
+                    st.warning("⚠️ Some sheets were skipped due to data problems:\n\n" + msg)
 
                 if rows:
                     summary = pd.DataFrame(rows)
 
-                    st.markdown("### \U0001f4c8 Plots")
+                    st.markdown("### 📈 Plots")
                     fig0, ax0 = plt.subplots(figsize=(9, 5))
                     for i, sheet in enumerate(fits_all):
                         f = fits_all[sheet]
@@ -508,41 +562,41 @@ with tab_kinetics:
                                  markeredgecolor="white", markeredgewidth=0.7)
                     ax0.set_xlabel("Time (min)", fontsize=12)
                     ax0.set_ylabel("Removal (%)", fontsize=12)
-                    ax0.set_title("ODS Performance \u2014 All Catalysts", fontsize=13, fontweight="bold")
+                    ax0.set_title("ODS Performance — All Catalysts", fontsize=13, fontweight="bold")
                     ax0.legend(fontsize=9); ax0.grid(True, alpha=0.3)
                     plt.tight_layout()
                     st.pyplot(fig0)
 
                     sheets_ok = list(fits_all.keys())
                     fig1 = _plot_model(fits_all, sheets_ok, "Zero-order",
-                                       "C\u209c (mol\u00b7L\u207b\u00b9)", "Zero-Order Fit | C\u209c vs t")
+                                       "Cₜ (mol·L⁻¹)", "Zero-Order Fit | Cₜ vs t")
                     fig2 = _plot_model(fits_all, sheets_ok, "Pseudo-first",
-                                       "C\u209c (mol\u00b7L\u207b\u00b9)", "Pseudo-First-Order Fit | C\u209c vs t")
+                                       "Cₜ (mol·L⁻¹)", "Pseudo-First-Order Fit | Cₜ vs t")
                     fig3 = _plot_model(fits_all, sheets_ok, "Second-order",
-                                       "C\u209c (mol\u00b7L\u207b\u00b9)", "Second-Order Fit | C\u209c vs t")
+                                       "Cₜ (mol·L⁻¹)", "Second-Order Fit | Cₜ vs t")
                     fig4 = _plot_model(fits_all, sheets_ok, "Elovich",
-                                       "C\u209c (mol\u00b7L\u207b\u00b9)", "Elovich Model Fit | C\u209c vs t")
+                                       "Cₜ (mol·L⁻¹)", "Elovich Model Fit | Cₜ vs t")
                     c_a, c_b = st.columns(2)
                     c_a.pyplot(fig1); c_b.pyplot(fig2)
                     c_c, c_d = st.columns(2)
                     c_c.pyplot(fig3); c_d.pyplot(fig4)
 
                     st.markdown("---")
-                    st.markdown("### \U0001f4cb Kinetics Summary \u2014 \u2605 = best model per catalyst")
+                    st.markdown("### 📋 Kinetics Summary — ★ = best model per catalyst")
                     disp = summary.copy()
                     for col in ["K0 (mol/L/min)", "Kapp (1/min)", "K2 (L/mol/min)",
-                                "Elovich alpha", "Elovich beta"]:
+                                "Elovich α", "Elovich β"]:
                         disp[col] = disp[col].apply(_fmt_sci)
                     for col in ["R2_zero", "R2_first", "R2_second", "R2_elovich", "Best R2"]:
-                        disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if v != -999 else "\u2014")
-                    disp["t_half (min)"] = disp["t_half (min)"].apply(_fmt_thalf)
+                        disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if v != -999 else "—")
+                    disp["t½ (min)"] = disp["t½ (min)"].apply(_fmt_thalf)
                     st.dataframe(disp, use_container_width=True)
 
                     st.markdown("---")
-                    st.markdown("### \u2b07\ufe0f Download Results")
+                    st.markdown("### ⬇️ Download Results")
                     tbl_buf = io.BytesIO()
                     summary.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
-                    st.download_button("\U0001f4e5 Download kinetics_summary.xlsx",
+                    st.download_button("📥 Download kinetics_summary.xlsx",
                                        data=tbl_buf, file_name="kinetics_summary.xlsx",
                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -557,13 +611,13 @@ with tab_kinetics:
                             fig.savefig(ib, dpi=300, bbox_inches="tight")
                             ib.seek(0); zf.writestr(fname, ib.read())
                     zip_buf.seek(0)
-                    st.download_button("\U0001f4e5 Download all plots (ZIP)",
+                    st.download_button("📥 Download all plots (ZIP)",
                                        data=zip_buf, file_name="ods_kinetics_plots.zip",
                                        mime="application/zip")
                 elif not errors:
                     st.info("No catalyst sheets with data found.")
     elif uploaded and C0_mol is None:
-        st.error("Fix the C\u2080 unit settings in the sidebar first.")
+        st.error("Fix the C₀ unit settings in the sidebar first.")
     else:
         st.info("Upload your filled Kinetics template to start the analysis. "
                 "Need a template? Go to Tab 1.")
@@ -573,7 +627,7 @@ with tab_kinetics:
 # ────────────────────────────────────────────────────────────
 with tab_tof:
     st.subheader("Turnover Frequency (TOF) and Turnover Number (TON)")
-    st.caption("Uses the global C\u2080 set in the sidebar for all catalysts.")
+    st.caption("Uses the global C₀ set in the sidebar for all catalysts.")
     uploaded_tof = st.file_uploader("Upload filled TOF/TON template", type=["xlsx", "xls"],
                                     key="tof_upl")
 
@@ -620,48 +674,48 @@ with tab_tof:
                                 "n_sites (mmol)": n_sites_mol * 1000,
                                 "n_substrate (mmol)": n_sub_mol * 1000,
                                 "TON": ton,
-                                "TOF (h-1)": tof,
+                                "TOF (h⁻¹)": tof,
                             })
                         result = pd.DataFrame(rows)
 
-                        st.markdown("### \U0001f4cb TOF / TON Summary")
+                        st.markdown("### 📋 TOF / TON Summary")
                         disp = result.copy()
                         for col in ["n_sites (mmol)", "n_substrate (mmol)"]:
                             disp[col] = disp[col].apply(lambda v: f"{v:.4f}")
-                        for col in ["TON", "TOF (h-1)"]:
+                        for col in ["TON", "TOF (h⁻¹)"]:
                             disp[col] = disp[col].apply(_fmt_sci)
                         st.dataframe(disp, use_container_width=True)
 
-                        st.markdown("### \U0001f4c8 Comparison")
+                        st.markdown("### 📈 Comparison")
                         fig, (axA, axB) = plt.subplots(1, 2, figsize=(11, 4.5))
                         cats = result["Catalyst"].astype(str)
                         colors_b = [COLORS[i % len(COLORS)] for i in range(len(cats))]
                         axA.bar(cats, result["TON"], color=colors_b, edgecolor="white")
                         axA.set_title("TON", fontweight="bold"); axA.set_ylabel("TON")
                         axA.tick_params(axis="x", rotation=30)
-                        axB.bar(cats, result["TOF (h-1)"], color=colors_b, edgecolor="white")
-                        axB.set_title("TOF (h\u207b\u00b9)", fontweight="bold"); axB.set_ylabel("TOF (h\u207b\u00b9)")
+                        axB.bar(cats, result["TOF (h⁻¹)"], color=colors_b, edgecolor="white")
+                        axB.set_title("TOF (h⁻¹)", fontweight="bold"); axB.set_ylabel("TOF (h⁻¹)")
                         axB.tick_params(axis="x", rotation=30)
                         for ax in (axA, axB):
                             ax.grid(True, alpha=0.3, axis="y")
                         plt.tight_layout()
                         st.pyplot(fig)
 
-                        st.markdown("### \u2b07\ufe0f Download Results")
+                        st.markdown("### ⬇️ Download Results")
                         tbl_buf = io.BytesIO()
                         result.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
-                        st.download_button("\U0001f4e5 Download tof_ton_summary.xlsx",
+                        st.download_button("📥 Download tof_ton_summary.xlsx",
                                            data=tbl_buf, file_name="tof_ton_summary.xlsx",
                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                         img_buf = io.BytesIO()
                         fig.savefig(img_buf, dpi=300, bbox_inches="tight"); img_buf.seek(0)
-                        st.download_button("\U0001f4e5 Download TOF_TON_comparison.png",
+                        st.download_button("📥 Download TOF_TON_comparison.png",
                                            data=img_buf, file_name="TOF_TON_comparison.png",
                                            mime="image/png")
         except Exception as e:
             st.error(f"Error: {e}")
     elif uploaded_tof and C0_mol is None:
-        st.error("Fix the C\u2080 unit settings in the sidebar first.")
+        st.error("Fix the C₀ unit settings in the sidebar first.")
     else:
         st.info("Upload your filled TOF/TON template to start the calculation. "
                 "Need a template? Go to Tab 1.")
@@ -719,12 +773,12 @@ with tab_reuse:
 
                 if errors:
                     msg = "\n".join(f"- **{s}**: {m}" for s, m in errors)
-                    st.warning("\u26a0\ufe0f Some sheets were skipped due to data problems:\n\n" + msg)
+                    st.warning("⚠️ Some sheets were skipped due to data problems:\n\n" + msg)
 
                 if rows:
                     result = pd.DataFrame(rows)
 
-                    st.markdown("### \U0001f4c8 Removal (%) over reuse cycles")
+                    st.markdown("### 📈 Removal (%) over reuse cycles")
                     fig, ax = plt.subplots(figsize=(9, 5))
                     for i, sheet in enumerate(data_ok):
                         d = data_ok[sheet]
@@ -739,18 +793,18 @@ with tab_reuse:
                     plt.tight_layout()
                     st.pyplot(fig)
 
-                    st.markdown("### \U0001f4cb Retention Summary")
+                    st.markdown("### 📋 Retention Summary")
                     st.dataframe(result, use_container_width=True)
 
-                    st.markdown("### \u2b07\ufe0f Download Results")
+                    st.markdown("### ⬇️ Download Results")
                     tbl_buf = io.BytesIO()
                     result.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
-                    st.download_button("\U0001f4e5 Download reusability_summary.xlsx",
+                    st.download_button("📥 Download reusability_summary.xlsx",
                                        data=tbl_buf, file_name="reusability_summary.xlsx",
                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     img_buf = io.BytesIO()
                     fig.savefig(img_buf, dpi=300, bbox_inches="tight"); img_buf.seek(0)
-                    st.download_button("\U0001f4e5 Download reusability_plot.png",
+                    st.download_button("📥 Download reusability_plot.png",
                                        data=img_buf, file_name="reusability_plot.png",
                                        mime="image/png")
                 elif not errors:
@@ -760,4 +814,4 @@ with tab_reuse:
                 "Need a template? Go to Tab 1.")
 
 st.markdown("---")
-st.caption("ODS Calculation Suite v2.1 | extended from CatLab-Tools by Hoda Jafari | MIT License")
+st.caption("ODS Calculation Suite v2.0 | extended from CatLab-Tools by Hoda Jafari | MIT License")
