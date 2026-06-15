@@ -4,19 +4,17 @@ ODS Calculation Suite — Streamlit Web App
 Extended build based on CatLab-Tools/app_ods.py (github.com/Hj1308/CatLab-Tools)
 Original author: Hoda Jafari
 
-v2.0 — additions & fixes on top of v1.4
+v2.1 — bug-fixes on top of v2.0
 ----------------------------------------
-FIXED : Elovich model now has a real t1/2 formula (was hard-coded to NaN,
-        so whenever Elovich was the best-fit model — common for
-        chemisorption-controlled kinetics — t1/2 showed "N/A").
-FIXED : Each catalyst sheet is processed in its own try/except block with
-        clear, specific error messages (wrong number of columns, not enough
-        valid rows, non-numeric cells, ...). One bad sheet no longer wipes
-        out the entire report.
-NEW   : TOF / TON module (turnover frequency / turnover number from
-        catalyst mass + active-site loading).
-NEW   : Reusability / recyclability module (removal % retained over reuse
-        cycles).
+FIXED : Sheet names in Excel templates are now sanitised before writing:
+        characters illegal in Excel sheet names ( \\ / ? * [ ] : )
+        are replaced with underscores, leading/trailing spaces and
+        apostrophes are stripped, and the result is capped at 31 chars.
+        Previously a name like "Fe₂O₃/SiO₂" crashed openpyxl with
+        ValueError on wks.title.
+FIXED : Catalyst mass and Fuel volume inputs removed from the Kinetics tab
+        (they belong only in the TOF/TON tab; the Kinetics engine does not
+        need them).
 """
 
 import streamlit as st
@@ -27,6 +25,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 import io
+import re
 import zipfile
 import warnings
 warnings.filterwarnings("ignore")
@@ -41,6 +40,14 @@ MARKERS = ["o","s","^","D","v","P","*","X","h"]
 # ════════════════════════════════════════════════════════════════
 # SHARED HELPERS
 # ════════════════════════════════════════════════════════════════
+_INVALID_SHEET_CHARS = re.compile(r'[\\/*?\[\]:]')
+
+def _safe_sheet_name(name: str) -> str:
+    """Return an Excel-legal sheet name (max 31 chars, no illegal chars)."""
+    name = _INVALID_SHEET_CHARS.sub("_", name)
+    name = name.strip(" '")          # strip leading/trailing spaces & apostrophes
+    return name[:31] if name else "Sheet"
+
 def _to_mol_L(value, unit, mw=None):
     unit = unit.strip()
     if unit == "mol/L":
@@ -84,13 +91,12 @@ def _elovich_t_half(C0, alpha, beta):
     Solve C(t1/2) = C0/2 for the Elovich model
     C(t) = C0 - (1/beta) * ln(1 + alpha*beta*t)
     => t1/2 = (exp(C0*beta/2) - 1) / (alpha*beta)
-    This was previously hard-coded to NaN in v1.4.
     """
     try:
         if alpha <= 0 or beta <= 0 or C0 <= 0:
             return float("nan")
         exponent = C0 * beta / 2.0
-        if exponent > 700:  # avoid exp() overflow
+        if exponent > 700:
             return float("inf")
         val = np.exp(exponent) - 1.0
         if val <= 0:
@@ -105,17 +111,17 @@ def _fmt_sci(val):
     if val == 0:
         return "0"
     if np.isinf(val):
-        return "∞"
+        return "\u221e"
     exp = int(np.floor(np.log10(abs(val))))
     coef = val / (10 ** exp)
-    sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
-    return f"{coef:.2f} × 10{str(exp).translate(sup)}"
+    sup = str.maketrans("0123456789-", "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207b")
+    return f"{coef:.2f} \u00d7 10{str(exp).translate(sup)}"
 
 def _fmt_thalf(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "N/A"
     if np.isinf(val):
-        return "≫ range"
+        return "\u226b range"
     if val > 1e5:
         return _fmt_sci(val)
     return f"{val:.2f}"
@@ -134,7 +140,7 @@ def _fit_nonlinear(time, Ct, C0):
         k0 = p[0]
         results["Zero-order"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+            "label": f"k\u2080 = {_fmt_sci(k0)} mol\u00b7L\u207b\u00b9\u00b7min\u207b\u00b9",
             "t_half": round(0.5 * C0 / k0, 2) if k0 > 0 else float("nan"),
             "k": k0, "col_k": "K0 (mol/L/min)",
         }
@@ -149,7 +155,7 @@ def _fit_nonlinear(time, Ct, C0):
         kapp = p[0]
         results["Pseudo-first"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
+            "label": f"k\u2090\u209a\u209a = {_fmt_sci(kapp)} min\u207b\u00b9",
             "t_half": round(np.log(2) / kapp, 2) if kapp > 0 else float("nan"),
             "k": kapp, "col_k": "Kapp (1/min)",
         }
@@ -164,14 +170,14 @@ def _fit_nonlinear(time, Ct, C0):
         k2 = p[0]
         results["Second-order"] = {
             "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+            "label": f"k\u2082 = {_fmt_sci(k2)} L\u00b7mol\u207b\u00b9\u00b7min\u207b\u00b9",
             "t_half": round(1.0 / (k2 * C0), 2) if k2 > 0 else float("nan"),
             "k": k2, "col_k": "K2 (L/mol/min)",
         }
     except Exception as e:
         results["Second-order"] = {"R2": -999, "error": str(e)}
 
-    # Elovich (t1/2 now computed instead of hard-coded NaN)
+    # Elovich
     try:
         if len(t) < 3:
             raise ValueError("Elovich needs at least 3 time points "
@@ -187,9 +193,9 @@ def _fit_nonlinear(time, Ct, C0):
         pred_full = _elovich(t, alpha, beta, C0)
         results["Elovich"] = {
             "params": (alpha, beta, C0), "R2": _r2(Ct, pred_full), "pred": pred_full,
-            "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
+            "label": f"\u03b1={_fmt_sci(alpha)}, \u03b2={_fmt_sci(beta)}",
             "t_half": _elovich_t_half(C0, alpha, beta),
-            "k": alpha, "beta": beta, "col_k": "α (mol/L/min)",
+            "k": alpha, "beta": beta, "col_k": "\u03b1 (mol/L/min)",
         }
     except Exception as e:
         results["Elovich"] = {"R2": -999, "error": str(e)}
@@ -208,9 +214,9 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             continue
         t = f["t"]; Ct = f["Ct"]
         c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
-        lbl = f"{sheet} R²={res['R2']:.4f}"
+        lbl = f"{sheet} R\u00b2={res['R2']:.4f}"
         if res.get("is_best"):
-            lbl += " ★best"
+            lbl += " \u2605best"
         ax.scatter(t, Ct, color=c, marker=m, s=60, zorder=3,
                    edgecolors="white", linewidths=0.6)
         t_fit = np.linspace(0, t[-1], 300)
@@ -220,15 +226,14 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
             pred_fit = _first_order(t_fit, *res["params"])
         elif model_name == "Second-order":
             pred_fit = _second_order(t_fit, *res["params"])
-        else:  # Elovich
+        else:
             pred_fit = _elovich(t_fit, *res["params"])
         ax.plot(t_fit, pred_fit, "--", color=c, lw=1.5, alpha=0.8, label=lbl)
 
-        # mark t1/2 on the curve if it falls within (or near) the data range
         th = res.get("t_half", float("nan"))
         if res.get("is_best") and not np.isnan(th) and not np.isinf(th) and 0 < th <= t[-1] * 1.5:
             ax.axvline(th, color=c, ls=":", lw=1.2, alpha=0.7)
-            ax.annotate("t½", xy=(th, ax.get_ylim()[1]*0.95), color=c,
+            ax.annotate("t\u00bd", xy=(th, ax.get_ylim()[1]*0.95), color=c,
                         fontsize=9, ha="center", fontweight="bold")
 
     ax.set_xlabel("Time (min)", fontsize=12)
@@ -239,7 +244,7 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
     return fig
 
 # ════════════════════════════════════════════════════════════════
-# TEMPLATE BUILDERS
+# TEMPLATE BUILDERS  (all use _safe_sheet_name)
 # ════════════════════════════════════════════════════════════════
 def make_kinetics_template(names):
     buf = io.BytesIO()
@@ -261,7 +266,7 @@ def make_kinetics_template(names):
         example.to_excel(w, sheet_name="Example", index=False)
         for name in names:
             pd.DataFrame({"Time (min)": [None]*6, "Removal (%)": [None]*6}
-                         ).to_excel(w, sheet_name=name[:31], index=False)
+                         ).to_excel(w, sheet_name=_safe_sheet_name(name), index=False)
     buf.seek(0)
     return buf
 
@@ -287,7 +292,7 @@ def make_reusability_template(names, n_cycles=5):
         for name in names:
             pd.DataFrame({"Cycle": list(range(1, n_cycles+1)),
                           "Removal (%)": [None]*n_cycles}
-                         ).to_excel(w, sheet_name=name[:31], index=False)
+                         ).to_excel(w, sheet_name=_safe_sheet_name(name), index=False)
     buf.seek(0)
     return buf
 
@@ -332,9 +337,8 @@ st.markdown(
 )
 st.markdown("---")
 
-# ---- Global parameters (shared by Kinetics & TOF/TON) ----
 with st.sidebar:
-    st.header("⚙️ Global Parameters")
+    st.header("\u2699\ufe0f Global Parameters")
     c0_val = st.number_input("C\u2080 (initial DBT concentration)", value=250.0, min_value=0.0001)
     c0_unit = st.selectbox("C\u2080 unit", ["ppmS", "ppm", "mg/L", "g/L", "mmol/L", "mol/L"])
     mw_poll = None
@@ -349,7 +353,7 @@ with st.sidebar:
         st.error(f"Unit error: {e}")
 
 tab_templates, tab_kinetics, tab_tof, tab_reuse = st.tabs(
-    ["\U0001f4e5 1. Templates", "\U0001f4ca 2. Kinetics & t\u00bd", "⚙️ 3. TOF / TON", "\u267b️ 4. Reusability"]
+    ["\U0001f4e5 1. Templates", "\U0001f4ca 2. Kinetics & t\u00bd", "\u2699\ufe0f 3. TOF / TON", "\u267b\ufe0f 4. Reusability"]
 )
 
 # ────────────────────────────────────────────────────────────
@@ -488,7 +492,7 @@ with tab_kinetics:
 
                 if errors:
                     msg = "\n".join(f"- **{s}**: {m}" for s, m in errors)
-                    st.warning("⚠️ Some sheets were skipped due to data problems:\n\n" + msg)
+                    st.warning("\u26a0\ufe0f Some sheets were skipped due to data problems:\n\n" + msg)
 
                 if rows:
                     summary = pd.DataFrame(rows)
@@ -535,7 +539,7 @@ with tab_kinetics:
                     st.dataframe(disp, use_container_width=True)
 
                     st.markdown("---")
-                    st.markdown("### \u2b07️ Download Results")
+                    st.markdown("### \u2b07\ufe0f Download Results")
                     tbl_buf = io.BytesIO()
                     summary.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
                     st.download_button("\U0001f4e5 Download kinetics_summary.xlsx",
@@ -643,7 +647,7 @@ with tab_tof:
                         plt.tight_layout()
                         st.pyplot(fig)
 
-                        st.markdown("### \u2b07️ Download Results")
+                        st.markdown("### \u2b07\ufe0f Download Results")
                         tbl_buf = io.BytesIO()
                         result.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
                         st.download_button("\U0001f4e5 Download tof_ton_summary.xlsx",
@@ -715,7 +719,7 @@ with tab_reuse:
 
                 if errors:
                     msg = "\n".join(f"- **{s}**: {m}" for s, m in errors)
-                    st.warning("⚠️ Some sheets were skipped due to data problems:\n\n" + msg)
+                    st.warning("\u26a0\ufe0f Some sheets were skipped due to data problems:\n\n" + msg)
 
                 if rows:
                     result = pd.DataFrame(rows)
@@ -738,7 +742,7 @@ with tab_reuse:
                     st.markdown("### \U0001f4cb Retention Summary")
                     st.dataframe(result, use_container_width=True)
 
-                    st.markdown("### \u2b07️ Download Results")
+                    st.markdown("### \u2b07\ufe0f Download Results")
                     tbl_buf = io.BytesIO()
                     result.to_excel(tbl_buf, index=False); tbl_buf.seek(0)
                     st.download_button("\U0001f4e5 Download reusability_summary.xlsx",
@@ -756,4 +760,4 @@ with tab_reuse:
                 "Need a template? Go to Tab 1.")
 
 st.markdown("---")
-st.caption("ODS Calculation Suite v2.0 | extended from CatLab-Tools by Hoda Jafari | MIT License")
+st.caption("ODS Calculation Suite v2.1 | extended from CatLab-Tools by Hoda Jafari | MIT License")
