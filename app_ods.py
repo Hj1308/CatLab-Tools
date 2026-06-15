@@ -71,6 +71,34 @@ def _make_fig(fits, sheets, colors, markers, ylabel, ykey, title, slope_key, int
     plt.tight_layout()
     return fig
 
+def _fmt_sci(val):
+    """Format float as scientific notation string: 2.34 × 10⁻⁷"""
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "N/A"
+    if val == 0:
+        return "0"
+    exp = int(np.floor(np.log10(abs(val))))
+    coef = val / (10 ** exp)
+    # superscript digits map
+    sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    exp_str = str(exp).translate(sup)
+    return f"{coef:.2f} × 10{exp_str}"
+
+def _format_summary(df):
+    """Return a display-only DataFrame with scientific notation for k columns."""
+    disp = df.copy().astype(str)
+    disp["Catalyst"]      = df["Catalyst"]
+    disp["X_final (%)"]   = df["X_final (%)"].apply(lambda v: f"{v:.1f}")
+    disp["K0 (mol/L/min)"]= df["K0 (mol/L/min)"].apply(_fmt_sci)
+    disp["R²_zero"]       = df["R2_zero"].apply(lambda v: f"{v:.4f}")
+    disp["Kapp (min⁻¹)"]  = df["Kapp (1/min)"].apply(_fmt_sci)
+    disp["R²_first"]      = df["R2_first"].apply(lambda v: f"{v:.4f}")
+    disp["K2 (L/mol/min)"]= df["K2 (L/mol/min)"].apply(_fmt_sci)
+    disp["R²_second"]     = df["R2_second"].apply(lambda v: f"{v:.4f}")
+    disp["t½ (min)"]      = df["t_half (min)"].apply(lambda v: f"{v:.1f}" if not np.isnan(v) else "N/A")
+    return disp[["Catalyst","X_final (%)","K0 (mol/L/min)","R²_zero",
+                 "Kapp (min⁻¹)","R²_first","K2 (L/mol/min)","R²_second","t½ (min)"]]
+
 COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
            "#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
 MARKERS = ["o","s","^","D","v","P","*","X","h"]
@@ -161,15 +189,15 @@ with tab2:
                     f = _fit(t_arr, Ct_arr, C0_mol)
                     fits[sheet] = f
                     rows.append({
-                        "Catalyst"               : sheet,
-                        "X_final (%)"            : round(rem[-1]*100, 1),
-                        "K0 (mol/L/min)"         : f["k0"],
-                        "R2_zero"                : f["R2_0"],
-                        "Kapp (1/min)"           : f["kapp"],
-                        "R2_first"               : f["R2_1"],
-                        "K2 (L/mol/min)"         : f["k2"],
-                        "R2_second"              : f["R2_2"],
-                        "t_half (min)"           : f["t_half"],
+                        "Catalyst"        : sheet,
+                        "X_final (%)"     : round(rem[-1]*100, 1),
+                        "K0 (mol/L/min)"  : f["k0"],
+                        "R2_zero"         : f["R2_0"],
+                        "Kapp (1/min)"    : f["kapp"],
+                        "R2_first"        : f["R2_1"],
+                        "K2 (L/mol/min)"  : f["k2"],
+                        "R2_second"       : f["R2_2"],
+                        "t_half (min)"    : f["t_half"],
                     })
 
                 summary = pd.DataFrame(rows)
@@ -217,10 +245,10 @@ with tab2:
                 c_b.pyplot(fig2)
                 c_c.pyplot(fig3)
 
-                # Summary table
+                # Summary table — scientific notation display
                 st.markdown("---")
                 st.markdown("### 📋 Kinetics Summary Table")
-                st.dataframe(summary, use_container_width=True)
+                st.dataframe(_format_summary(summary), use_container_width=True)
 
                 # Downloads
                 st.markdown("---")
@@ -256,4 +284,4 @@ with tab2:
             st.info("Upload your filled Excel template to start analysis.")
 
 st.markdown("---")
-st.caption("CatLab-Tools v1.2 | MIT License | github.com/Hj1308/CatLab-Tools")
+st.caption("CatLab-Tools v1.3 | MIT License | github.com/Hj1308/CatLab-Tools")
