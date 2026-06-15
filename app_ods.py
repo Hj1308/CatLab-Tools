@@ -346,7 +346,12 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
         lbl += ")"
         ax.scatter(t, Ct, color=c, marker=m, s=75, zorder=3,
                    edgecolors="black", linewidths=0.7)
-        t_fit = np.linspace(0, t[-1], 300)
+        t_max = t[-1]
+        if model_name == "Zero-order":
+            k0, C0_fit = res["params"]
+            if k0 > 0:
+                t_max = min(t[-1], C0_fit / k0)  # stop at C=0, don't draw the clipped shelf
+        t_fit = np.linspace(0, t_max, 300)
         if model_name == "Zero-order":
             pred_fit = _zero_order(t_fit, *res["params"])
         elif model_name == "Pseudo-first":
