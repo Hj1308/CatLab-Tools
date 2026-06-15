@@ -83,12 +83,25 @@ def _elovich(t, alpha, beta, C0):
         np.maximum(alpha * beta * t, 0))
 
 def _lh_model(t, k_LH, K_ads, C0):
-    """Langmuir-Hinshelwood: dC/dt = -kLH·K·C/(1+K·C), solved numerically."""
+    """
+    Langmuir-Hinshelwood: dC/dt = -kLH·K·C/(1+K·C), solved numerically.
+    NOTE: odeint(func, y0, t) treats t[0] as the time at which y0 holds.
+    Our measured time arrays start at the first sampling time (e.g. t=20 min),
+    not t=0 - but C0 is the concentration AT t=0. So we prepend a t=0 anchor,
+    integrate from there, and drop that point from the returned solution.
+    If t already starts at 0 (e.g. the dense grid used for plotting), no
+    prepending is needed.
+    """
+    t = np.asarray(t, dtype=float)
     def dC(C, tt):
         Cv = max(C[0], 0.0)
         return [-k_LH * K_ads * Cv / (1.0 + K_ads * Cv)]
-    sol = odeint(dC, [C0], t, rtol=1e-6, atol=1e-9)
-    return np.maximum(sol.flatten(), 0.0)
+    if t[0] == 0:
+        sol = odeint(dC, [C0], t, rtol=1e-6, atol=1e-9)
+        return np.maximum(sol.flatten(), 0.0)
+    t_full = np.concatenate(([0.0], t))
+    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
+    return np.maximum(sol.flatten()[1:], 0.0)
 
 def _r2(y_obs, y_pred):
     ss_res = np.sum((y_obs - y_pred) ** 2)
@@ -1153,7 +1166,6 @@ with tab_compare:
                 df_c["__condition__"] = lbl
                 dfs_cond.append(df_c)
 
-            # find the metric column — handle both v2 and v3 column names
             col_map = {
                 "t½ (min)": "t½ (min)",
                 "Best R2":  "Best R2",
@@ -1161,7 +1173,6 @@ with tab_compare:
             }
             metric_col = col_map[metric_cmp]
 
-            # check metric column exists in all files
             missing_metric = [condition_labels[i] for i, df_c in enumerate(dfs_cond)
                                if metric_col not in df_c.columns]
             if missing_metric:
@@ -1177,7 +1188,6 @@ with tab_compare:
                 combined = pd.concat(dfs_cond, ignore_index=True)
                 catalysts_all = combined["Catalyst"].unique().tolist()
 
-                # pivot: rows = catalysts, columns = conditions
                 pivot = combined.pivot_table(index="Catalyst", columns="__condition__",
                                               values=metric_col, aggfunc="first")
                 pivot = pivot.reindex(columns=condition_labels)
@@ -1185,7 +1195,6 @@ with tab_compare:
                 st.markdown(f"### 📋 {metric_cmp} — All Conditions")
                 st.dataframe(pivot.style.format("{:.3f}", na_rep="—"), use_container_width=True)
 
-                # Grouped bar chart
                 fig_cmp, ax_cmp = plt.subplots(figsize=(max(9, len(catalysts_all)*1.5), 5))
                 x_pos = np.arange(len(catalysts_all))
                 bar_w = 0.8 / len(condition_labels)
