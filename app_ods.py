@@ -253,6 +253,41 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
     return fig
 
 
+def _linreg_r2(x, y):
+    A = np.vstack([x, np.ones_like(x)]).T
+    slope, intercept = np.linalg.lstsq(A, y, rcond=None)[0]
+    yhat = slope * x + intercept
+    return slope, intercept, _r2(y, yhat)
+
+
+def _plot_linearization(fits_all, sheets, C0_mol, transform, ylabel, title):
+    """
+    Classic linearized-kinetics plot: y = transform(Ct, C0) vs t, with a
+    simple linear regression line per catalyst (slope, intercept, R2).
+    Returns (fig, lin_results) where lin_results[sheet] = (slope, intercept, R2).
+    """
+    fig, ax = plt.subplots(figsize=(9, 5))
+    lin_results = {}
+    for i, sheet in enumerate(sheets):
+        f = fits_all[sheet]
+        t = f["t"]; Ct = f["Ct"]
+        y = transform(Ct, C0_mol)
+        slope, intercept, r2v = _linreg_r2(t, y)
+        lin_results[sheet] = (slope, intercept, r2v)
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
+        ax.scatter(t, y, color=c, marker=m, s=60, zorder=3,
+                   edgecolors="white", linewidths=0.6)
+        t_fit = np.array([0, t[-1]])
+        ax.plot(t_fit, slope*t_fit + intercept, "--", color=c, lw=1.5, alpha=0.8,
+                label=f"{sheet} R²={r2v:.4f}")
+    ax.set_xlabel("Time (min)", fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig, lin_results
+
+
 # ════════════════════════════════════════════════════════════════
 #  TEMPLATE BUILDERS
 # ════════════════════════════════════════════════════════════════
@@ -463,6 +498,13 @@ $$X(\%) = \dfrac{C_0 - C_t}{C_0}\times 100$$
 | Second-order | $C_t = C_0/(1+k_2 C_0 t)$ | $1/(k_2 C_0)$ |
 | Elovich | $C_t = C_0 - \dfrac{1}{\beta}\ln(1+\alpha\beta t)$ | $\dfrac{e^{C_0\beta/2}-1}{\alpha\beta}$ |
 
+**Classic linearized plots** (shown alongside the non-linear fits; $C_0$ here is the
+nominal initial concentration set in the sidebar)
+$$\ln\left(\dfrac{C_0}{C_t}\right) = k_{app,lin}\,t \qquad\qquad
+\dfrac{1}{C_t}-\dfrac{1}{C_0} = k_{2,lin}\,t$$
+$k_{app,lin}$ and $k_{2,lin}$ are the slopes of simple linear regressions of these
+quantities vs $t$; their R² values are reported as R2_first_lin / R2_second_lin.
+
 **TOF / TON**
 $$n_{sites} = m_{cat}\times(\text{active sites, mmol/g}) \quad\quad
 n_{sub} = C_0\cdot\dfrac{X}{100}\cdot V$$
@@ -606,13 +648,39 @@ with tab_kinetics:
                     c_c, c_d = st.columns(2)
                     c_c.pyplot(fig3); c_d.pyplot(fig4)
 
+                    st.markdown("#### Classic linearized-kinetics plots")
+                    fig5, lin_first = _plot_linearization(
+                        fits_all, sheets_ok, C0_mol,
+                        transform=lambda Ct, C0: np.log(C0/Ct),
+                        ylabel="ln(C₀/Cₜ)",
+                        title="Pseudo-First-Order Linearization | ln(C₀/Cₜ) vs t")
+                    fig6, lin_second = _plot_linearization(
+                        fits_all, sheets_ok, C0_mol,
+                        transform=lambda Ct, C0: 1.0/Ct - 1.0/C0,
+                        ylabel="1/Cₜ − 1/C₀  (L·mol⁻¹)",
+                        title="Second-Order Linearization | 1/Cₜ − 1/C₀ vs t")
+                    c_e, c_f = st.columns(2)
+                    c_e.pyplot(fig5); c_f.pyplot(fig6)
+
+                    # add linear-regression K & R2 to the summary table
+                    summary["Kapp_lin (1/min)"] = summary["Catalyst"].map(
+                        lambda s: lin_first[s][0])
+                    summary["R2_first_lin"] = summary["Catalyst"].map(
+                        lambda s: lin_first[s][2])
+                    summary["K2_lin (L/mol/min)"] = summary["Catalyst"].map(
+                        lambda s: lin_second[s][0])
+                    summary["R2_second_lin"] = summary["Catalyst"].map(
+                        lambda s: lin_second[s][2])
+
                     st.markdown("---")
                     st.markdown("### 📋 Kinetics Summary — ★ = best model per catalyst")
                     disp = summary.copy()
                     for col in ["K0 (mol/L/min)", "Kapp (1/min)", "K2 (L/mol/min)",
-                                "Elovich α", "Elovich β"]:
+                                "Elovich α", "Elovich β",
+                                "Kapp_lin (1/min)", "K2_lin (L/mol/min)"]:
                         disp[col] = disp[col].apply(_fmt_sci)
-                    for col in ["R2_zero", "R2_first", "R2_second", "R2_elovich", "Best R2"]:
+                    for col in ["R2_zero", "R2_first", "R2_second", "R2_elovich", "Best R2",
+                                "R2_first_lin", "R2_second_lin"]:
                         disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if v != -999 else "—")
                     disp["t½ (min)"] = disp["t½ (min)"].apply(_fmt_thalf)
                     st.dataframe(disp, use_container_width=True)
@@ -631,7 +699,9 @@ with tab_kinetics:
                                             ("02_zero_order.png", fig1),
                                             ("03_pseudo_first.png", fig2),
                                             ("04_second_order.png", fig3),
-                                            ("05_elovich.png", fig4)]:
+                                            ("05_elovich.png", fig4),
+                                            ("06_pseudo_first_linear.png", fig5),
+                                            ("07_second_order_linear.png", fig6)]:
                             ib = io.BytesIO()
                             fig.savefig(ib, dpi=300, bbox_inches="tight")
                             ib.seek(0); zf.writestr(fname, ib.read())
