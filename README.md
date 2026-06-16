@@ -78,6 +78,22 @@ $$\eta_{H_2O_2}(\%) = \frac{n_{DBT,\,removed}}{n_{H_2O_2,\,consumed} / 2} \times
 
 Stoichiometry: DBT + 2 H₂O₂ → DBTO₂ + 2 H₂O (1 : 2 molar ratio).
 
+**How inputs are computed:**
+
+$$n_{DBT,\,removed} \,[\text{mmol}] = X\% \times C_0 \,[\text{mol/L}] \times V_{fuel} \,[\text{mL}] \times \frac{1}{100} \times 1000$$
+
+$$n_{H_2O_2,\,consumed} \,[\text{mmol}] = \frac{n_{H_2O_2,\,added} - n_{H_2O_2,\,remaining}}{1}$$
+
+> If H₂O₂ is fully consumed and not measured separately, the stoichiometric amount is used: $n_{H_2O_2,\,consumed} = 2 \times n_{DBT,\,removed}$
+
+**Required input columns (Excel template):**
+
+| Column | Unit | Description |
+|--------|------|-------------|
+| `X_final (%)` | % | Sulfur removal at end of reaction |
+| `n_DBT_removed (mmol)` | mmol | Moles of DBT removed (= X% × C₀ × V_fuel / 100 × 1000) |
+| `n_H2O2_consumed (mmol)` | mmol | Moles of H₂O₂ consumed (measured or stoichiometric) |
+
 ---
 
 ## 📉 Parameter Effect (Tab 5)
