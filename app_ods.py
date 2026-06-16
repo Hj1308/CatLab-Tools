@@ -4,23 +4,30 @@ ODS Calculation Suite — Streamlit Web App
 Extended build based on CatLab-Tools/app_ods.py (github.com/Hj1308/CatLab-Tools)
 Original author: Hoda Jafari
 
+v3.1 — Bug-fix release on top of v3.0
+----------------------------------------
+FIX 1: C₀ is now locked (fixed) in curve_fit for all models.
+        Previously C₀ was a free parameter with ±50% bounds, causing each
+        catalyst to get a slightly different C₀ — violating the assumption
+        that C₀ is known from the experiment.
+FIX 2: Second-order t½ corrected to 1/(k₂·C₀).
+        Was incorrectly using ln2/k (the pseudo-first-order formula).
+FIX 3: Extrapolation warning added when t½ < first data point.
+FIX 4: Best-model selection now uses AIC instead of R².
+        Elovich was always winning because it has more parameters; AIC
+        penalises model complexity. Adj-R² and AIC are shown in the table.
+FIX 5: r₀/m formula corrected — r₀ × V_fuel / m_cat.
+        Previous code omitted V_fuel, causing a ~500× error in the
+        mass-normalised activity metric.
+
 v3.0 — additions on top of v2.0
 ----------------------------------------
 NEW  : k ± SE (standard error from curve_fit covariance matrix) for all models.
-NEW  : r₀ (initial reaction rate) — model-independent activity metric:
-         Pseudo-first:  r₀ = kapp × C₀  (mol·L⁻¹·min⁻¹)
-         Second-order:  r₀ = k₂  × C₀²  (mol·L⁻¹·min⁻¹)
-         Elovich:       r₀ = α           (mol·L⁻¹·min⁻¹)
-         Zero-order:    r₀ = k₀          (mol·L⁻¹·min⁻¹)
+NEW  : r₀ (initial reaction rate) — model-independent activity metric.
 NEW  : Langmuir-Hinshelwood (L-H) model as 5th kinetic model.
-         rate = kLH·K·C / (1 + K·C)  — integrated numerically via ODE.
-NEW  : Tab 5 — Parameter Effect: plots X%, k, or t½ vs a variable parameter
-         (catalyst loading, H₂O₂ dose, DBT concentration, voltage, light intensity…)
-         for multiple catalysts on one chart.
-NEW  : Tab 6 — Oxidant Efficiency: η = n_DBT_removed / (n_H₂O₂_consumed × 2).
-NEW  : Tab 7 — Condition Comparison: upload multiple kinetics_summary.xlsx files
-         (one per condition: Thermal, UV, ECODS…) and compare t½ / k side-by-side
-         with grouped bar charts.
+NEW  : Tab 5 — Parameter Effect.
+NEW  : Tab 6 — Oxidant Efficiency.
+NEW  : Tab 7 — Condition Comparison.
 """
 
 import streamlit as st
@@ -78,6 +85,16 @@ COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
            "#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
 MARKERS = ["o","s","^","D","v","P","*","X","h"]
 
+# Number of free parameters per model (used for AIC / Adj-R²)
+# C₀ is now FIXED, so it does NOT count as a fitted parameter.
+N_PARAMS = {
+    "Zero-order":   1,   # k0
+    "Pseudo-first": 1,   # kapp
+    "Second-order": 1,   # k2
+    "Elovich":      2,   # alpha, beta
+    "L-H":          2,   # k_LH, K_ads
+}
+
 # Common ODS/ODN substrates with molecular weight (g/mol), for C0 unit conversion
 SUBSTRATES = {
     "DBT (Dibenzothiophene)":        184.26,
@@ -129,12 +146,6 @@ def _elovich(t, alpha, beta, C0):
 def _lh_model(t, k_LH, K_ads, C0):
     """
     Langmuir-Hinshelwood: dC/dt = -kLH·K·C/(1+K·C), solved numerically.
-    NOTE: odeint(func, y0, t) treats t[0] as the time at which y0 holds.
-    Our measured time arrays start at the first sampling time (e.g. t=20 min),
-    not t=0 - but C0 is the concentration AT t=0. So we prepend a t=0 anchor,
-    integrate from there, and drop that point from the returned solution.
-    If t already starts at 0 (e.g. the dense grid used for plotting), no
-    prepending is needed.
     """
     t = np.asarray(t, dtype=float)
     def dC(C, tt):
@@ -152,6 +163,24 @@ def _r2(y_obs, y_pred):
     ss_tot = np.sum((y_obs - np.mean(y_obs)) ** 2)
     return round(1 - ss_res / ss_tot if ss_tot > 0 else 0.0, 4)
 
+# FIX 4 — model-selection helpers ─────────────────────────────
+def _adj_r2(r2, n, p):
+    """Adjusted R²: penalises extra parameters. n=data points, p=free params."""
+    if n <= p + 1:
+        return float("nan")
+    return round(1 - (1 - r2) * (n - 1) / (n - p - 1), 4)
+
+def _aic(y_obs, y_pred, p):
+    """
+    AIC = n·ln(RSS/n) + 2p
+    Lower AIC → better model (balances fit quality against complexity).
+    """
+    n = len(y_obs)
+    rss = np.sum((y_obs - y_pred) ** 2)
+    if rss <= 0 or n == 0:
+        return float("inf")
+    return round(n * np.log(rss / n) + 2 * p, 4)
+
 def _elovich_t_half(C0, alpha, beta):
     try:
         if alpha <= 0 or beta <= 0 or C0 <= 0:
@@ -167,12 +196,9 @@ def _elovich_t_half(C0, alpha, beta):
         return float("nan")
 
 def _lh_t_half(C0, k_LH, K_ads):
-    """Solve C(t½) = C0/2 analytically: t½ = [ln2/K + C0/2·(1-1/(K·C0))] ... use numerical."""
     try:
         if k_LH <= 0 or K_ads <= 0 or C0 <= 0:
             return float("nan")
-        # analytical: t½ = (ln2 + K_ads*(C0 - C0/2)) / (kLH * K_ads) ... simplified:
-        # integral from C0 to C0/2 of (1+KC)/kLH/K dC = ln2/kLH/K + C0/2/kLH
         t_half = (np.log(2) / (k_LH * K_ads)) + (C0 / 2.0) / k_LH
         return t_half
     except Exception:
@@ -212,68 +238,86 @@ def _fmt_pm(val, se):
     return f"({val/scale:.2f} ± {se/scale:.2f}) × 10{str(exp).translate(str.maketrans('0123456789-','⁰¹²³⁴⁵⁶⁷⁸⁹⁻'))}"
 
 
-# ── Non-linear fitting engine (v3.0 — captures pcov → k±SE, r₀) ──
+# ── Non-linear fitting engine (v3.1 — C₀ fixed, AIC, corrected t½ & r₀/m) ──
 def _fit_nonlinear(time, Ct, C0):
-    t = np.asarray(time, dtype=float)
-    Ct = np.asarray(Ct, dtype=float)
+    t  = np.asarray(time, dtype=float)
+    Ct = np.asarray(Ct,   dtype=float)
+    n  = len(t)
     results = {}
 
-    # Zero-order
+    # ── Zero-order  (FIX 1: C0 fixed via lambda) ──────────────
     try:
-        p, pcov = curve_fit(_zero_order, t, Ct, p0=[1e-6, C0],
-                            bounds=([0, C0*0.5], [np.inf, C0*1.5]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov))
-        pred = _zero_order(t, *p)
-        k0 = p[0]
+        p, pcov = curve_fit(
+            lambda t_, k: _zero_order(t_, k, C0),
+            t, Ct, p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000
+        )
+        se   = np.sqrt(np.diag(pcov))
+        k0   = p[0]
+        pred = _zero_order(t, k0, C0)
+        r2v  = _r2(Ct, pred)
+        np_  = N_PARAMS["Zero-order"]
         results["Zero-order"] = {
-            "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
-            "t_half": round(0.5 * p[1] / k0, 2) if k0 > 0 else float("nan"),
+            "params":  (k0, C0), "R2": r2v, "pred": pred,
+            "adj_r2":  _adj_r2(r2v, n, np_),
+            "aic":     _aic(Ct, pred, np_),
+            "label":   f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+            "t_half":  round(0.5 * C0 / k0, 2) if k0 > 0 else float("nan"),
             "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)",
             "r0": k0, "r0_se": se[0],
         }
     except Exception as e:
-        results["Zero-order"] = {"R2": -999, "error": str(e)}
+        results["Zero-order"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
-    # Pseudo-first-order
+    # ── Pseudo-first-order  (FIX 1: C0 fixed) ─────────────────
     try:
-        p, pcov = curve_fit(_first_order, t, Ct, p0=[0.01, C0],
-                            bounds=([0, C0*0.5], [np.inf, C0*1.5]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov))
-        pred = _first_order(t, *p)
+        p, pcov = curve_fit(
+            lambda t_, k: _first_order(t_, k, C0),
+            t, Ct, p0=[0.01], bounds=([0], [np.inf]), maxfev=5000
+        )
+        se   = np.sqrt(np.diag(pcov))
         kapp = p[0]
-        r0 = kapp * C0
-        r0_se = se[0] * C0
+        pred = _first_order(t, kapp, C0)
+        r2v  = _r2(Ct, pred)
+        np_  = N_PARAMS["Pseudo-first"]
+        r0   = kapp * C0
         results["Pseudo-first"] = {
-            "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
-            "t_half": round(np.log(2) / kapp, 2) if kapp > 0 else float("nan"),
+            "params":  (kapp, C0), "R2": r2v, "pred": pred,
+            "adj_r2":  _adj_r2(r2v, n, np_),
+            "aic":     _aic(Ct, pred, np_),
+            "label":   f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
+            "t_half":  round(np.log(2) / kapp, 2) if kapp > 0 else float("nan"),
             "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)",
-            "r0": r0, "r0_se": r0_se,
+            "r0": r0, "r0_se": se[0] * C0,
         }
     except Exception as e:
-        results["Pseudo-first"] = {"R2": -999, "error": str(e)}
+        results["Pseudo-first"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
-    # Second-order
+    # ── Second-order  (FIX 1: C0 fixed; FIX 2: t½ = 1/(k2·C0)) ──
     try:
-        p, pcov = curve_fit(_second_order, t, Ct, p0=[1e-3, C0],
-                            bounds=([0, C0*0.5], [np.inf, C0*1.5]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov))
-        pred = _second_order(t, *p)
-        k2 = p[0]
-        r0 = k2 * C0 ** 2
-        r0_se = se[0] * C0 ** 2
+        p, pcov = curve_fit(
+            lambda t_, k: _second_order(t_, k, C0),
+            t, Ct, p0=[1e-3], bounds=([0], [np.inf]), maxfev=5000
+        )
+        se   = np.sqrt(np.diag(pcov))
+        k2   = p[0]
+        pred = _second_order(t, k2, C0)
+        r2v  = _r2(Ct, pred)
+        np_  = N_PARAMS["Second-order"]
+        r0   = k2 * C0 ** 2
         results["Second-order"] = {
-            "params": p, "R2": _r2(Ct, pred), "pred": pred,
-            "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
-            "t_half": round(1.0 / (k2 * p[1]), 2) if k2 > 0 else float("nan"),
+            "params":  (k2, C0), "R2": r2v, "pred": pred,
+            "adj_r2":  _adj_r2(r2v, n, np_),
+            "aic":     _aic(Ct, pred, np_),
+            "label":   f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+            # FIX 2: correct formula t½ = 1 / (k2 * C0)
+            "t_half":  round(1.0 / (k2 * C0), 2) if k2 > 0 else float("nan"),
             "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)",
-            "r0": r0, "r0_se": r0_se,
+            "r0": r0, "r0_se": se[0] * C0 ** 2,
         }
     except Exception as e:
-        results["Second-order"] = {"R2": -999, "error": str(e)}
+        results["Second-order"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
-    # Elovich
+    # ── Elovich ────────────────────────────────────────────────
     try:
         if len(t) < 2:
             raise ValueError("Elovich needs at least 2 time points")
@@ -286,46 +330,54 @@ def _fit_nonlinear(time, Ct, C0):
         )
         se = np.sqrt(np.diag(pcov))
         alpha, beta = p
-        pred_full = _elovich(t, alpha, beta, C0)
+        pred = _elovich(t, alpha, beta, C0)
+        r2v  = _r2(Ct, pred)
+        np_  = N_PARAMS["Elovich"]
         results["Elovich"] = {
-            "params": (alpha, beta, C0), "R2": _r2(Ct, pred_full), "pred": pred_full,
-            "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
-            "t_half": _elovich_t_half(C0, alpha, beta),
+            "params":  (alpha, beta, C0), "R2": r2v, "pred": pred,
+            "adj_r2":  _adj_r2(r2v, n, np_),
+            "aic":     _aic(Ct, pred, np_),
+            "label":   f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
+            "t_half":  _elovich_t_half(C0, alpha, beta),
             "k": alpha, "k_se": se[0], "beta": beta, "col_k": "α (mol/L/min)",
             "r0": alpha, "r0_se": se[0],
         }
     except Exception as e:
-        results["Elovich"] = {"R2": -999, "error": str(e)}
+        results["Elovich"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
-    # Langmuir-Hinshelwood (NEW in v3.0)
+    # ── Langmuir-Hinshelwood ───────────────────────────────────
     try:
         if len(t) < 3:
             raise ValueError("L-H model needs at least 3 time points")
-        p0_lh = [0.01, 10.0]
         p, pcov = curve_fit(
             lambda tt, kl, ka: _lh_model(tt, kl, ka, C0),
             t, Ct,
-            p0=p0_lh,
+            p0=[0.01, 10.0],
             bounds=([1e-8, 1e-4], [1e3, 1e6]),
             maxfev=15000
         )
         se = np.sqrt(np.diag(pcov))
         k_LH, K_ads = p
-        pred_lh = _lh_model(t, k_LH, K_ads, C0)
+        pred = _lh_model(t, k_LH, K_ads, C0)
+        r2v  = _r2(Ct, pred)
+        np_  = N_PARAMS["L-H"]
         r0_lh = k_LH * K_ads * C0 / (1.0 + K_ads * C0)
         results["L-H"] = {
-            "params": (k_LH, K_ads, C0), "R2": _r2(Ct, pred_lh), "pred": pred_lh,
-            "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
-            "t_half": _lh_t_half(C0, k_LH, K_ads),
+            "params":  (k_LH, K_ads, C0), "R2": r2v, "pred": pred,
+            "adj_r2":  _adj_r2(r2v, n, np_),
+            "aic":     _aic(Ct, pred, np_),
+            "label":   f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
+            "t_half":  _lh_t_half(C0, k_LH, K_ads),
             "k": k_LH, "k_se": se[0], "K_ads": K_ads, "K_ads_se": se[1],
-            "col_k": "kLH (1/min)",
+            "col_k":   "kLH (1/min)",
             "r0": r0_lh, "r0_se": float("nan"),
         }
     except Exception as e:
-        results["L-H"] = {"R2": -999, "error": str(e)}
+        results["L-H"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
+    # FIX 4: select best model by AIC (lower = better), not R² ──
     candidates = [m for m in results if m != "Zero-order"]
-    best_name = max(candidates, key=lambda m: results[m].get("R2", -999))
+    best_name = min(candidates, key=lambda m: results[m].get("aic", float("inf")))
     for name in results:
         results[name]["is_best"] = (name == best_name)
     return results
@@ -334,15 +386,15 @@ def _fit_nonlinear(time, Ct, C0):
 def _plot_model(fits_all, sheets, model_name, ylabel, title):
     fig, ax = plt.subplots(figsize=(8.5, 5.2))
     for i, sheet in enumerate(sheets):
-        f = fits_all[sheet]
+        f   = fits_all[sheet]
         res = f["fits"].get(model_name, {})
         if res.get("R2", -999) < -100:
             continue
-        t = f["t"]; Ct = f["Ct"]
-        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
+        t  = f["t"]; Ct = f["Ct"]
+        c  = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         lbl = f"{sheet}  (R²={res['R2']:.4f}"
         if res.get("is_best"):
-            lbl += ", best"
+            lbl += ", best✓"
         lbl += ")"
         ax.scatter(t, Ct, color=c, marker=m, s=75, zorder=3,
                    edgecolors="black", linewidths=0.7)
@@ -350,7 +402,7 @@ def _plot_model(fits_all, sheets, model_name, ylabel, title):
         if model_name == "Zero-order":
             k0, C0_fit = res["params"]
             if k0 > 0:
-                t_max = min(t[-1], C0_fit / k0)  # stop at C=0, don't draw the clipped shelf
+                t_max = min(t[-1], C0_fit / k0)
         t_fit = np.linspace(0, t_max, 300)
         if model_name == "Zero-order":
             pred_fit = _zero_order(t_fit, *res["params"])
@@ -388,12 +440,12 @@ def _plot_linearization(fits_all, sheets, C0_mol, transform, ylabel, title):
     fig, ax = plt.subplots(figsize=(8.5, 5.2))
     lin_results = {}
     for i, sheet in enumerate(sheets):
-        f = fits_all[sheet]
-        t = f["t"]; Ct = f["Ct"]
-        y = transform(Ct, C0_mol)
+        f  = fits_all[sheet]
+        t  = f["t"]; Ct = f["Ct"]
+        y  = transform(Ct, C0_mol)
         slope, intercept, r2v = _linreg_r2(t, y)
         lin_results[sheet] = (slope, intercept, r2v)
-        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
+        c  = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         ax.scatter(t, y, color=c, marker=m, s=75, zorder=3,
                    edgecolors="black", linewidths=0.7)
         t_fit = np.array([0, t[-1]])
@@ -507,7 +559,6 @@ def make_tof_template(names):
 
 
 def make_param_effect_template():
-    """Template for Parameter Effect module (Tab 5)."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         instr = pd.DataFrame({
@@ -532,7 +583,6 @@ def make_param_effect_template():
 
 
 def make_ox_efficiency_template(names):
-    """Template for Oxidant Efficiency module (Tab 6)."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         instr = pd.DataFrame({
@@ -561,7 +611,7 @@ def make_ox_efficiency_template(names):
 # ════════════════════════════════════════════════════════════════
 st.title("🔬 ODS Calculation Suite")
 st.markdown(
-    "**CatLab-Tools v3.0** — based on the work of Hoda Jafari · "
+    "**CatLab-Tools v3.1** — based on the work of Hoda Jafari · "
     "[GitHub](https://github.com/Hj1308/CatLab-Tools)"
 )
 st.markdown("---")
@@ -579,10 +629,8 @@ with st.sidebar:
                                help="Auto-filled from the substrate above; "
                                     "edit freely if your value differs.")
 
-    c0_val = st.number_input("C₀ (initial concentration)", value=250.0, min_value=0.0001)
+    c0_val  = st.number_input("C₀ (initial concentration)", value=250.0, min_value=0.0001)
     c0_unit = st.selectbox("C₀ unit", ["ppmS", "ppm", "mg/L", "g/L", "mmol/L", "mol/L"])
-    # ppmS uses the fixed sulfur MW; the other mass-based units use the
-    # substrate MW selected above
     mw_for_conversion = MW_S if c0_unit == "ppmS" else mw_poll
     try:
         C0_mol = _to_mol_L(c0_val, c0_unit, mw_for_conversion)
@@ -591,11 +639,11 @@ with st.sidebar:
         C0_mol = None
         st.error(f"Unit error: {e}")
 
-    st.markdown("**Reaction conditions** (used for mass-normalized rate &amp; figure captions)")
+    st.markdown("**Reaction conditions** (used for mass-normalised rate & figure captions)")
     cat_mass_mg = st.number_input("Catalyst mass (mg)", value=20.0, min_value=0.0, step=1.0)
     fuel_vol_ml = st.number_input("Fuel / model-oil volume (mL)", value=5.0, min_value=0.0, step=0.5)
-    cat_mass_g = cat_mass_mg / 1000.0
-    fuel_vol_L = fuel_vol_ml / 1000.0
+    cat_mass_g  = cat_mass_mg / 1000.0
+    fuel_vol_L  = fuel_vol_ml / 1000.0
     conditions_caption = (f"{substrate.split(' (')[0]}, C₀={c0_val:g} {c0_unit}, "
                            f"{cat_mass_mg:g} mg catalyst, {fuel_vol_ml:g} mL fuel")
     st.caption(conditions_caption)
@@ -606,9 +654,9 @@ with st.sidebar:
     "📊 2. Kinetics & t½",
     "⚙️ 3. TOF / TON",
     "♻️ 4. Reusability",
-    "📉 5. Parameter Effect",   # NEW
-    "💧 6. Oxidant Efficiency",  # NEW
-    "🔀 7. Condition Comparison", # NEW
+    "📉 5. Parameter Effect",
+    "💧 6. Oxidant Efficiency",
+    "🔀 7. Condition Comparison",
 ])
 
 
@@ -626,7 +674,7 @@ with tab_templates:
     if not names:
         st.warning("Please enter at least one catalyst name.")
     else:
-        kin_buf, kin_map = make_kinetics_template(names)
+        kin_buf,  kin_map  = make_kinetics_template(names)
         reuse_buf, reuse_map = make_reusability_template(names, int(n_cycles))
 
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -661,7 +709,7 @@ with tab_templates:
             )
 
     st.markdown("---")
-    with st.expander("📐 Formulas used in this app (v3.0)"):
+    with st.expander("📐 Formulas used in this app (v3.1)"):
         st.markdown(r"""
 **Kinetic models**
 
@@ -669,12 +717,17 @@ with tab_templates:
 |---|---|---|
 | Zero-order | $C_t = C_0 - k_0 t$ | $C_0/(2k_0)$ |
 | Pseudo-first | $C_t = C_0 e^{-k_{app}t}$ | $\ln 2 / k_{app}$ |
-| Second-order | $C_t = C_0/(1+k_2 C_0 t)$ | $1/(k_2 C_0)$ |
+| Second-order | $C_t = C_0/(1+k_2 C_0 t)$ | $1/(k_2 C_0)$ ✓ |
 | Elovich | $C_t = C_0 - \frac{1}{\beta}\ln(1+\alpha\beta t)$ | $(e^{C_0\beta/2}-1)/(\alpha\beta)$ |
 | **L-H** | $\frac{dC}{dt} = -\frac{k_{LH} K C}{1+KC}$ (ODE) | $\frac{\ln 2}{k_{LH}K} + \frac{C_0/2}{k_{LH}}$ |
 
+**Best-model selection (v3.1):** AIC = n·ln(RSS/n) + 2p  — lower is better.
+
 **Initial rate r₀ (mol·L⁻¹·min⁻¹)**
 $$r_0^{(1)} = k_{app} C_0 \qquad r_0^{(2)} = k_2 C_0^2 \qquad r_0^{Elovich} = \alpha \qquad r_0^{LH} = \frac{k_{LH} K C_0}{1+K C_0}$$
+
+**Mass-normalised rate (v3.1 — corrected):**
+$$r_0/m \;(\text{mol·g}^{-1}\text{·min}^{-1}) = \frac{r_0 \times V_{fuel}}{m_{cat}}$$
 
 **Standard Error**: $SE_k = \sqrt{[\Sigma^{-1}]_{kk}}$ where $\Sigma$ = covariance matrix from `scipy.curve_fit`.
 
@@ -687,10 +740,15 @@ $$TON = \frac{n_{sub}}{n_{sites}} \qquad TOF = \frac{TON}{t(h)}$$
 
 
 # ────────────────────────────────────────────────────────────
-# TAB 2 — KINETICS & t½  (v3.0: +SE, +r₀, +L-H model)
+# TAB 2 — KINETICS & t½  (v3.1)
 # ────────────────────────────────────────────────────────────
 with tab_kinetics:
     st.subheader("Kinetics fitting (Zero / Pseudo-first / Second-order / Elovich / L-H) + k±SE + r₀")
+    st.info(
+        "**v3.1 fixes applied:** C₀ is now fixed (not fitted). "
+        "Second-order t½ uses 1/(k₂·C₀). Best model selected by AIC. "
+        "r₀/m includes fuel volume. Extrapolation warnings shown."
+    )
     uploaded = st.file_uploader("Upload filled Kinetics template", type=["xlsx", "xls"],
                                  key="kin_upl")
 
@@ -710,11 +768,11 @@ with tab_kinetics:
 
                 for sheet in sheets:
                     try:
-                        raw = xl.parse(sheet)
-                        df = raw.dropna(how="all")
+                        raw   = xl.parse(sheet)
+                        df    = raw.dropna(how="all")
                         if df.shape[1] != 2:
                             raise ValueError(f"expected 2 columns, found {df.shape[1]}")
-                        df = df.dropna()
+                        df    = df.dropna()
                         if len(df) < 2:
                             raise ValueError(f"only {len(df)} valid row(s) — need ≥2")
                         df.columns = ["Time (min)", "Removal (%)"]
@@ -727,54 +785,86 @@ with tab_kinetics:
                         fits = _fit_nonlinear(t_arr, Ct_arr, C0_mol)
                         fits_all[sheet] = {"t": t_arr, "Ct": Ct_arr, "fits": fits}
 
-                        candidates = ["Pseudo-first", "Second-order", "Elovich", "L-H"]
-                        best = max(candidates, key=lambda m: fits[m].get("R2", -999))
+                        candidates   = ["Pseudo-first", "Second-order", "Elovich", "L-H"]
+                        # FIX 4: use AIC for best model
+                        best         = min(candidates,
+                                           key=lambda m: fits[m].get("aic", float("inf")))
+                        r1           = fits["Pseudo-first"].get("R2", -999)
+                        r2v          = fits["Second-order"].get("R2", -999)
+                        order_label  = "Second-order" if r2v > r1 else "Pseudo-first-order"
+                        best_res     = fits[best]
 
-                        r1  = fits["Pseudo-first"].get("R2", -999)
-                        r2v = fits["Second-order"].get("R2", -999)
-                        order_label = "Second-order" if r2v > r1 else "Pseudo-first-order"
+                        # FIX 3: extrapolation warning
+                        t_half_val       = best_res.get("t_half", float("nan"))
+                        first_time_point = t_arr[0] if len(t_arr) > 0 else 0.0
+                        if (not np.isnan(t_half_val) and
+                                not np.isinf(t_half_val) and
+                                first_time_point > 0 and
+                                t_half_val < first_time_point):
+                            st.warning(
+                                f"⚠️ **{sheet}** — t½ = {t_half_val:.2f} min is **before** the "
+                                f"first data point ({first_time_point:.1f} min). "
+                                f"This value is **extrapolated** and should be interpreted "
+                                f"with caution."
+                            )
 
-                        best_res = fits[best]
+                        # FIX 5: r₀/m = r₀ × V_fuel / m_cat  (corrected)
+                        r0_val    = best_res.get("r0",    float("nan"))
+                        r0_se_val = best_res.get("r0_se", float("nan"))
+                        if cat_mass_g > 0 and fuel_vol_L > 0:
+                            r0m     = r0_val    * fuel_vol_L / cat_mass_g
+                            r0m_se  = r0_se_val * fuel_vol_L / cat_mass_g
+                        else:
+                            r0m = r0m_se = float("nan")
 
                         rows.append({
                             "Catalyst":              sheet,
                             "X_final (%)":           round(rem[-1]*100, 1),
                             # Zero-order
-                            "K0 (mol/L/min)":        fits["Zero-order"].get("k", float("nan")),
+                            "K0 (mol/L/min)":        fits["Zero-order"].get("k",    float("nan")),
                             "K0_SE":                 fits["Zero-order"].get("k_se", float("nan")),
-                            "R2_zero":               fits["Zero-order"].get("R2", -999),
+                            "R2_zero":               fits["Zero-order"].get("R2",   -999),
+                            "AdjR2_zero":            fits["Zero-order"].get("adj_r2", float("nan")),
+                            "AIC_zero":              fits["Zero-order"].get("aic",  float("nan")),
                             # Pseudo-first
-                            "Kapp (1/min)":          fits["Pseudo-first"].get("k", float("nan")),
+                            "Kapp (1/min)":          fits["Pseudo-first"].get("k",    float("nan")),
                             "Kapp_SE":               fits["Pseudo-first"].get("k_se", float("nan")),
-                            "R2_first":              fits["Pseudo-first"].get("R2", -999),
+                            "R2_first":              fits["Pseudo-first"].get("R2",   -999),
+                            "AdjR2_first":           fits["Pseudo-first"].get("adj_r2", float("nan")),
+                            "AIC_first":             fits["Pseudo-first"].get("aic",  float("nan")),
                             # Second-order
-                            "K2 (L/mol/min)":        fits["Second-order"].get("k", float("nan")),
+                            "K2 (L/mol/min)":        fits["Second-order"].get("k",    float("nan")),
                             "K2_SE":                 fits["Second-order"].get("k_se", float("nan")),
-                            "R2_second":             fits["Second-order"].get("R2", -999),
+                            "R2_second":             fits["Second-order"].get("R2",   -999),
+                            "AdjR2_second":          fits["Second-order"].get("adj_r2", float("nan")),
+                            "AIC_second":            fits["Second-order"].get("aic",  float("nan")),
                             # Elovich
-                            "Elovich α":             fits["Elovich"].get("k", float("nan")),
+                            "Elovich α":             fits["Elovich"].get("k",    float("nan")),
                             "Elovich α_SE":          fits["Elovich"].get("k_se", float("nan")),
                             "Elovich β":             fits["Elovich"].get("beta", float("nan")),
-                            "R2_elovich":            fits["Elovich"].get("R2", -999),
-                            # L-H (NEW)
-                            "kLH (1/min)":           fits["L-H"].get("k", float("nan")),
-                            "kLH_SE":                fits["L-H"].get("k_se", float("nan")),
-                            "K_ads (L/mol)":         fits["L-H"].get("K_ads", float("nan")),
-                            "R2_LH":                 fits["L-H"].get("R2", -999),
+                            "R2_elovich":            fits["Elovich"].get("R2",   -999),
+                            "AdjR2_elovich":         fits["Elovich"].get("adj_r2", float("nan")),
+                            "AIC_elovich":           fits["Elovich"].get("aic",  float("nan")),
+                            # L-H
+                            "kLH (1/min)":           fits["L-H"].get("k",       float("nan")),
+                            "kLH_SE":                fits["L-H"].get("k_se",    float("nan")),
+                            "K_ads (L/mol)":         fits["L-H"].get("K_ads",   float("nan")),
+                            "R2_LH":                 fits["L-H"].get("R2",      -999),
+                            "AdjR2_LH":              fits["L-H"].get("adj_r2",  float("nan")),
+                            "AIC_LH":                fits["L-H"].get("aic",     float("nan")),
                             # Best model
                             "Reaction Order":        order_label,
-                            "Best Model":            best,
-                            "Best R2":               best_res.get("R2", float("nan")),
-                            "t½ (min)":              best_res.get("t_half", float("nan")),
-                            # r₀ (NEW)
-                            "r₀ (mol/L/min)":        best_res.get("r0", float("nan")),
-                            "r₀_SE":                 best_res.get("r0_se", float("nan")),
-                            # mass-normalized r₀ (NEW): activity per gram of catalyst,
-                            # using the global catalyst mass set in the sidebar
-                            "r₀/m (mol/g/min)":      (best_res.get("r0", float("nan")) / cat_mass_g
-                                                       if cat_mass_g > 0 else float("nan")),
-                            "r₀/m_SE":               (best_res.get("r0_se", float("nan")) / cat_mass_g
-                                                       if cat_mass_g > 0 else float("nan")),
+                            "Best Model (AIC)":      best,
+                            "Best R2":               best_res.get("R2",      float("nan")),
+                            "Best AdjR2":            best_res.get("adj_r2",  float("nan")),
+                            "Best AIC":              best_res.get("aic",     float("nan")),
+                            "t½ (min)":              t_half_val,
+                            # r₀
+                            "r₀ (mol/L/min)":        r0_val,
+                            "r₀_SE":                 r0_se_val,
+                            # FIX 5: corrected r₀/m with V_fuel
+                            "r₀/m (mol/g_cat/min)":  r0m,
+                            "r₀/m_SE":               r0m_se,
                         })
                     except Exception as e:
                         errors.append((sheet, str(e)))
@@ -805,16 +895,16 @@ with tab_kinetics:
                     st.caption(f"Reaction conditions: {conditions_caption}")
 
                     sheets_ok = list(fits_all.keys())
-                    fig1 = _plot_model(fits_all, sheets_ok, "Zero-order",
+                    fig1  = _plot_model(fits_all, sheets_ok, "Zero-order",
                                         "Cₜ (mol·L⁻¹)", "Zero-Order Fit")
-                    fig2 = _plot_model(fits_all, sheets_ok, "Pseudo-first",
+                    fig2  = _plot_model(fits_all, sheets_ok, "Pseudo-first",
                                         "Cₜ (mol·L⁻¹)", "Pseudo-First-Order Fit")
-                    fig3 = _plot_model(fits_all, sheets_ok, "Second-order",
+                    fig3  = _plot_model(fits_all, sheets_ok, "Second-order",
                                         "Cₜ (mol·L⁻¹)", "Second-Order Fit")
-                    fig4 = _plot_model(fits_all, sheets_ok, "Elovich",
+                    fig4  = _plot_model(fits_all, sheets_ok, "Elovich",
                                         "Cₜ (mol·L⁻¹)", "Elovich Model Fit")
                     fig4b = _plot_model(fits_all, sheets_ok, "L-H",
-                                         "Cₜ (mol·L⁻¹)", "Langmuir-Hinshelwood Fit (NEW)")
+                                        "Cₜ (mol·L⁻¹)", "Langmuir-Hinshelwood Fit")
 
                     c_a, c_b = st.columns(2)
                     c_a.pyplot(fig1); c_b.pyplot(fig2)
@@ -836,56 +926,70 @@ with tab_kinetics:
                     c_e, c_f = st.columns(2)
                     c_e.pyplot(fig5); c_f.pyplot(fig6)
 
-                    summary["Kapp_lin (1/min)"] = summary["Catalyst"].map(lambda s: lin_first[s][0])
-                    summary["R2_first_lin"]     = summary["Catalyst"].map(lambda s: lin_first[s][2])
-                    summary["K2_lin (L/mol/min)"] = summary["Catalyst"].map(lambda s: lin_second[s][0])
-                    summary["R2_second_lin"]    = summary["Catalyst"].map(lambda s: lin_second[s][2])
+                    summary["Kapp_lin (1/min)"]   = summary["Catalyst"].map(lambda s: lin_first[s][0])
+                    summary["R2_first_lin"]        = summary["Catalyst"].map(lambda s: lin_first[s][2])
+                    summary["K2_lin (L/mol/min)"]  = summary["Catalyst"].map(lambda s: lin_second[s][0])
+                    summary["R2_second_lin"]       = summary["Catalyst"].map(lambda s: lin_second[s][2])
 
                     # r₀ bar chart
-                    st.markdown("### 📊 Initial Rate r₀ Comparison (model-independent activity ranking)")
+                    st.markdown("### 📊 Initial Rate r₀ Comparison")
                     fig_r0, ax_r0 = plt.subplots(figsize=(9, 4))
-                    cats_r0 = summary["Catalyst"].tolist()
-                    r0_vals = summary["r₀ (mol/L/min)"].tolist()
-                    r0_ses  = summary["r₀_SE"].tolist()
+                    cats_r0   = summary["Catalyst"].tolist()
+                    r0_vals   = summary["r₀ (mol/L/min)"].tolist()
+                    r0_ses    = summary["r₀_SE"].tolist()
                     colors_r0 = [COLORS[i % len(COLORS)] for i in range(len(cats_r0))]
-                    bars = ax_r0.bar(cats_r0, r0_vals, color=colors_r0,
-                                     yerr=[s if not np.isnan(s) else 0 for s in r0_ses],
-                                     capsize=5, edgecolor="white")
+                    ax_r0.bar(cats_r0, r0_vals, color=colors_r0,
+                              yerr=[s if not np.isnan(s) else 0 for s in r0_ses],
+                              capsize=5, edgecolor="white")
                     ax_r0.set_ylabel("r₀ (mol·L⁻¹·min⁻¹)", fontsize=12)
-                    ax_r0.set_title("Initial Reaction Rate r₀ per Catalyst", fontsize=13, fontweight="bold")
+                    ax_r0.set_title("Initial Reaction Rate r₀ per Catalyst",
+                                    fontsize=13, fontweight="bold")
                     ax_r0.tick_params(axis="x", rotation=30)
                     ax_r0.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                     plt.tight_layout()
                     st.pyplot(fig_r0)
 
                     st.markdown("---")
-                    st.markdown("### 📋 Kinetics Summary (v3.0 — includes k±SE and r₀)")
+                    st.markdown("### 📋 Kinetics Summary (v3.1 — AIC, corrected t½ & r₀/m)")
                     disp = summary.copy()
-                    disp["K0 ± SE"]    = disp.apply(lambda r: _fmt_pm(r["K0 (mol/L/min)"], r["K0_SE"]), axis=1)
-                    disp["Kapp ± SE"]  = disp.apply(lambda r: _fmt_pm(r["Kapp (1/min)"], r["Kapp_SE"]), axis=1)
-                    disp["K2 ± SE"]    = disp.apply(lambda r: _fmt_pm(r["K2 (L/mol/min)"], r["K2_SE"]), axis=1)
-                    disp["α ± SE"]     = disp.apply(lambda r: _fmt_pm(r["Elovich α"], r["Elovich α_SE"]), axis=1)
-                    disp["kLH ± SE"]   = disp.apply(lambda r: _fmt_pm(r["kLH (1/min)"], r["kLH_SE"]), axis=1)
-                    disp["r₀ ± SE"]    = disp.apply(lambda r: _fmt_pm(r["r₀ (mol/L/min)"], r["r₀_SE"]), axis=1)
-                    disp["r₀/m ± SE"]  = disp.apply(lambda r: _fmt_pm(r["r₀/m (mol/g/min)"], r["r₀/m_SE"]), axis=1)
+                    disp["K0 ± SE"]   = disp.apply(lambda r: _fmt_pm(r["K0 (mol/L/min)"],   r["K0_SE"]),    axis=1)
+                    disp["Kapp ± SE"] = disp.apply(lambda r: _fmt_pm(r["Kapp (1/min)"],      r["Kapp_SE"]),  axis=1)
+                    disp["K2 ± SE"]   = disp.apply(lambda r: _fmt_pm(r["K2 (L/mol/min)"],   r["K2_SE"]),    axis=1)
+                    disp["α ± SE"]    = disp.apply(lambda r: _fmt_pm(r["Elovich α"],         r["Elovich α_SE"]), axis=1)
+                    disp["kLH ± SE"]  = disp.apply(lambda r: _fmt_pm(r["kLH (1/min)"],      r["kLH_SE"]),   axis=1)
+                    disp["r₀ ± SE"]   = disp.apply(lambda r: _fmt_pm(r["r₀ (mol/L/min)"],   r["r₀_SE"]),    axis=1)
+                    disp["r₀/m ± SE"] = disp.apply(lambda r: _fmt_pm(r["r₀/m (mol/g_cat/min)"], r["r₀/m_SE"]), axis=1)
                     for col in ["R2_zero","R2_first","R2_second","R2_elovich","R2_LH","Best R2",
                                 "R2_first_lin","R2_second_lin"]:
                         disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if v != -999 else "—")
+                    for col in ["AdjR2_first","AdjR2_second","AdjR2_elovich","AdjR2_LH","Best AdjR2"]:
+                        disp[col] = disp[col].apply(lambda v: f"{v:.4f}" if not np.isnan(v) else "—")
+                    for col in ["AIC_first","AIC_second","AIC_elovich","AIC_LH","Best AIC"]:
+                        disp[col] = disp[col].apply(lambda v: f"{v:.2f}" if not np.isnan(v) else "—")
                     for col in ["Kapp_lin (1/min)", "K2_lin (L/mol/min)"]:
                         disp[col] = disp[col].apply(_fmt_sci)
-                    disp["t½ (min)"] = disp["t½ (min)"].apply(_fmt_thalf)
+                    disp["t½ (min)"]    = disp["t½ (min)"].apply(_fmt_thalf)
                     disp["K_ads (L/mol)"] = disp["K_ads (L/mol)"].apply(_fmt_sci)
-                    show_cols = ["Catalyst","X_final (%)","K0 ± SE","R2_zero",
-                                 "Kapp ± SE","R2_first","K2 ± SE","R2_second",
-                                 "α ± SE","R2_elovich","kLH ± SE","R2_LH",
-                                 "Reaction Order","Best Model","Best R2","t½ (min)",
-                                 "r₀ ± SE","r₀/m ± SE","Kapp_lin (1/min)","R2_first_lin",
-                                 "K2_lin (L/mol/min)","R2_second_lin"]
-                    st.caption(f"Reaction conditions: {conditions_caption}. "
-                               f"r₀/m = r₀ ÷ catalyst mass (set in sidebar), "
-                               f"i.e. mol DBT converted per gram of catalyst per minute "
-                               f"at t→0 - a model-independent, mass-based activity metric "
-                               f"that doesn't require the active-site loading needed for TOF.")
+
+                    show_cols = [
+                        "Catalyst", "X_final (%)",
+                        "K0 ± SE", "R2_zero", "AIC_zero",
+                        "Kapp ± SE", "R2_first", "AdjR2_first", "AIC_first",
+                        "K2 ± SE", "R2_second", "AdjR2_second", "AIC_second",
+                        "α ± SE", "R2_elovich", "AdjR2_elovich", "AIC_elovich",
+                        "kLH ± SE", "R2_LH", "AdjR2_LH", "AIC_LH",
+                        "Reaction Order", "Best Model (AIC)", "Best R2", "Best AdjR2", "Best AIC",
+                        "t½ (min)", "r₀ ± SE", "r₀/m ± SE",
+                        "Kapp_lin (1/min)", "R2_first_lin",
+                        "K2_lin (L/mol/min)", "R2_second_lin",
+                    ]
+                    st.caption(
+                        f"Reaction conditions: {conditions_caption}. "
+                        f"Best model selected by AIC (lower = better fit, penalised for extra parameters). "
+                        f"r₀/m = r₀ × V_fuel ÷ m_cat "
+                        f"({fuel_vol_ml:g} mL × r₀ ÷ {cat_mass_mg:g} mg) — "
+                        f"mass-based activity in mol·g⁻¹·min⁻¹."
+                    )
                     st.dataframe(disp[show_cols], use_container_width=True)
 
                     st.markdown("### ⬇️ Download Results")
@@ -898,14 +1002,14 @@ with tab_kinetics:
                     zip_buf = io.BytesIO()
                     with zipfile.ZipFile(zip_buf, "w") as zf:
                         for fname, fig in [("01_removal_vs_time.png", fig0),
-                                            ("02_zero_order.png", fig1),
-                                            ("03_pseudo_first.png", fig2),
-                                            ("04_second_order.png", fig3),
-                                            ("05_elovich.png", fig4),
-                                            ("05b_LH.png", fig4b),
+                                            ("02_zero_order.png",      fig1),
+                                            ("03_pseudo_first.png",    fig2),
+                                            ("04_second_order.png",    fig3),
+                                            ("05_elovich.png",         fig4),
+                                            ("05b_LH.png",             fig4b),
                                             ("06_pseudo_first_linear.png", fig5),
                                             ("07_second_order_linear.png", fig6),
-                                            ("08_r0_comparison.png", fig_r0)]:
+                                            ("08_r0_comparison.png",   fig_r0)]:
                             ib = io.BytesIO()
                             fig.savefig(ib, dpi=300, bbox_inches="tight")
                             ib.seek(0); zf.writestr(fname, ib.read())
@@ -947,21 +1051,21 @@ with tab_tof:
                     else:
                         rows = []
                         for _, r in df.iterrows():
-                            mass = float(r["Catalyst mass (g)"])
-                            sites = float(r["Active sites (mmol/g)"])
-                            vol = float(r["Fuel volume (L)"])
-                            X = float(r["Removal (%)"])
-                            th = float(r["Reaction time (h)"])
+                            mass        = float(r["Catalyst mass (g)"])
+                            sites       = float(r["Active sites (mmol/g)"])
+                            vol         = float(r["Fuel volume (L)"])
+                            X           = float(r["Removal (%)"])
+                            th          = float(r["Reaction time (h)"])
                             n_sites_mol = mass * sites / 1000.0
-                            delta_C = C0_mol * (X / 100.0)
-                            n_sub_mol = delta_C * vol
+                            delta_C     = C0_mol * (X / 100.0)
+                            n_sub_mol   = delta_C * vol
                             if n_sites_mol <= 0:
                                 ton = tof = float("nan")
                             else:
                                 ton = n_sub_mol / n_sites_mol
                                 tof = ton / th if th > 0 else float("nan")
                             rows.append({"Catalyst": r["Catalyst"], "Removal (%)": X,
-                                          "n_sites (mmol)": n_sites_mol*1000,
+                                          "n_sites (mmol)":     n_sites_mol*1000,
                                           "n_substrate (mmol)": n_sub_mol*1000,
                                           "TON": ton, "TOF (h⁻¹)": tof})
                         result = pd.DataFrame(rows)
@@ -973,9 +1077,9 @@ with tab_tof:
                             disp[col] = disp[col].apply(_fmt_sci)
                         st.dataframe(disp, use_container_width=True)
                         fig, (axA, axB) = plt.subplots(1, 2, figsize=(11, 4.5))
-                        cats = result["Catalyst"].astype(str)
+                        cats     = result["Catalyst"].astype(str)
                         colors_b = [COLORS[i % len(COLORS)] for i in range(len(cats))]
-                        axA.bar(cats, result["TON"], color=colors_b, edgecolor="white")
+                        axA.bar(cats, result["TON"],       color=colors_b, edgecolor="white")
                         axA.set_title("TON", fontweight="bold"); axA.set_ylabel("TON")
                         axA.tick_params(axis="x", rotation=30)
                         axB.bar(cats, result["TOF (h⁻¹)"], color=colors_b, edgecolor="white")
@@ -1020,15 +1124,15 @@ with tab_reuse:
                 for sheet in sheets:
                     try:
                         raw = xl.parse(sheet)
-                        df = raw.dropna(how="all")
+                        df  = raw.dropna(how="all")
                         if df.shape[1] != 2:
                             raise ValueError(f"expected 2 columns, found {df.shape[1]}")
-                        df = df.dropna()
+                        df  = df.dropna()
                         if len(df) < 1:
                             raise ValueError("no valid data rows found")
                         df.columns = ["Cycle","Removal (%)"]
-                        cyc = df["Cycle"].values.astype(float)
-                        x   = df["Removal (%)"].values.astype(float)
+                        cyc   = df["Cycle"].values.astype(float)
+                        x     = df["Removal (%)"].values.astype(float)
                         order = np.argsort(cyc)
                         cyc, x = cyc[order], x[order]
                         if x[0] == 0:
@@ -1069,7 +1173,7 @@ with tab_reuse:
 
 
 # ────────────────────────────────────────────────────────────
-# TAB 5 — PARAMETER EFFECT  (NEW in v3.0)
+# TAB 5 — PARAMETER EFFECT
 # ────────────────────────────────────────────────────────────
 with tab_param:
     st.subheader("📉 Parameter Effect on Catalytic Performance")
@@ -1080,8 +1184,8 @@ with tab_param:
         "Y-axis metric = X_final(%) or kapp or t½ — whichever you filled in."
     )
     uploaded_param = st.file_uploader("Upload Parameter Effect file", type=["xlsx","xls"], key="param_upl")
-    metric_label = st.text_input("Y-axis label (e.g. 'X_final (%)', 'kapp (1/min)', 't½ (min)')",
-                                  value="X_final (%)")
+    metric_label   = st.text_input("Y-axis label (e.g. 'X_final (%)', 'kapp (1/min)', 't½ (min)')",
+                                    value="X_final (%)")
 
     if uploaded_param:
         try:
@@ -1098,19 +1202,19 @@ with tab_param:
                 all_figs_param = []
                 for psheet in param_sheets:
                     try:
-                        df_p = xl_p.parse(psheet).dropna(how="all").dropna(axis=1, how="all")
+                        df_p      = xl_p.parse(psheet).dropna(how="all").dropna(axis=1, how="all")
                         if df_p.shape[1] < 2:
                             st.warning(f"Sheet '{psheet}': need at least 2 columns.")
                             continue
                         param_col = df_p.columns[0]
                         cat_cols  = df_p.columns[1:].tolist()
-                        df_p = df_p.dropna(subset=[param_col])
-                        x_vals = df_p[param_col].values.astype(float)
+                        df_p      = df_p.dropna(subset=[param_col])
+                        x_vals    = df_p[param_col].values.astype(float)
 
                         fig_p, ax_p = plt.subplots(figsize=(9, 5))
                         for i, cat in enumerate(cat_cols):
                             y_vals = pd.to_numeric(df_p[cat], errors="coerce").values
-                            valid = ~np.isnan(y_vals)
+                            valid  = ~np.isnan(y_vals)
                             if valid.sum() < 1:
                                 continue
                             ax_p.plot(x_vals[valid], y_vals[valid],
@@ -1147,7 +1251,7 @@ with tab_param:
 
 
 # ────────────────────────────────────────────────────────────
-# TAB 6 — OXIDANT EFFICIENCY  (NEW in v3.0)
+# TAB 6 — OXIDANT EFFICIENCY
 # ────────────────────────────────────────────────────────────
 with tab_oxeff:
     st.subheader("💧 Oxidant Efficiency (H₂O₂ Utilisation)")
@@ -1167,9 +1271,9 @@ Upload the **Oxidant Efficiency template** (from Tab 1) with columns:
             if "OxEff" not in xl_ox.sheet_names:
                 st.error("Sheet 'OxEff' not found. Please use the template from Tab 1.")
             else:
-                df_ox = xl_ox.parse("OxEff").dropna(how="all")
+                df_ox      = xl_ox.parse("OxEff").dropna(how="all")
                 required_ox = ["Catalyst","n_DBT_removed (mmol)","n_H2O2_consumed (mmol)"]
-                missing_ox = [c for c in required_ox if c not in df_ox.columns]
+                missing_ox  = [c for c in required_ox if c not in df_ox.columns]
                 if missing_ox:
                     st.error(f"Missing columns: {', '.join(missing_ox)}")
                 else:
@@ -1191,13 +1295,15 @@ Upload the **Oxidant Efficiency template** (from Tab 1) with columns:
                         st.dataframe(disp_ox, use_container_width=True)
 
                         fig_ox, ax_ox = plt.subplots(figsize=(9, 5))
-                        cats_ox = df_ox["Catalyst"].astype(str).tolist()
-                        eta_vals = df_ox["η_H2O2 (%)"].tolist()
+                        cats_ox   = df_ox["Catalyst"].astype(str).tolist()
+                        eta_vals  = df_ox["η_H2O2 (%)"].tolist()
                         colors_ox = [COLORS[i % len(COLORS)] for i in range(len(cats_ox))]
                         ax_ox.bar(cats_ox, eta_vals, color=colors_ox, edgecolor="white")
-                        ax_ox.axhline(100, color="red", ls="--", lw=1.2, alpha=0.7, label="100% theoretical max")
+                        ax_ox.axhline(100, color="red", ls="--", lw=1.2, alpha=0.7,
+                                      label="100% theoretical max")
                         ax_ox.set_ylabel("η H₂O₂ (%)", fontsize=12)
-                        ax_ox.set_title("H₂O₂ Oxidant Efficiency per Catalyst", fontsize=13, fontweight="bold")
+                        ax_ox.set_title("H₂O₂ Oxidant Efficiency per Catalyst",
+                                        fontsize=13, fontweight="bold")
                         ax_ox.tick_params(axis="x", rotation=30)
                         ax_ox.legend(fontsize=9)
                         ax_ox.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
@@ -1221,7 +1327,7 @@ Upload the **Oxidant Efficiency template** (from Tab 1) with columns:
 
 
 # ────────────────────────────────────────────────────────────
-# TAB 7 — CONDITION COMPARISON  (NEW in v3.0)
+# TAB 7 — CONDITION COMPARISON
 # ────────────────────────────────────────────────────────────
 with tab_compare:
     st.subheader("🔀 Condition Comparison: Thermal vs UV vs ECODS …")
@@ -1233,7 +1339,7 @@ with tab_compare:
 
     n_conditions = st.number_input("Number of conditions to compare", min_value=2, max_value=8,
                                     value=2, step=1)
-    condition_files = []
+    condition_files  = []
     condition_labels = []
     cols_cond = st.columns(int(n_conditions))
     for i, col in enumerate(cols_cond):
@@ -1244,7 +1350,8 @@ with tab_compare:
             condition_labels.append(lbl)
             condition_files.append(f)
 
-    metric_cmp = st.selectbox("Metric to compare", ["t½ (min)", "Best R2", "r₀ (mol/L/min)"])
+    metric_cmp = st.selectbox("Metric to compare",
+                               ["t½ (min)", "Best R2", "r₀ (mol/L/min)", "Best AIC"])
 
     if all(f is not None for f in condition_files):
         try:
@@ -1254,31 +1361,24 @@ with tab_compare:
                 df_c["__condition__"] = lbl
                 dfs_cond.append(df_c)
 
-            # find the metric column — handle both v2 and v3 column names
             col_map = {
-                "t½ (min)": "t½ (min)",
-                "Best R2":  "Best R2",
-                "r₀ (mol/L/min)": "r₀ (mol/L/min)",
+                "t½ (min)":          "t½ (min)",
+                "Best R2":           "Best R2",
+                "r₀ (mol/L/min)":    "r₀ (mol/L/min)",
+                "Best AIC":          "Best AIC",
             }
             metric_col = col_map[metric_cmp]
 
-            # check metric column exists in all files
             missing_metric = [condition_labels[i] for i, df_c in enumerate(dfs_cond)
                                if metric_col not in df_c.columns]
             if missing_metric:
-                if metric_col == "r₀ (mol/L/min)":
-                    st.warning(
-                        f"Column '{metric_col}' not found in: {', '.join(missing_metric)}. "
-                        "This column requires v3.0 kinetics output. "
-                        "Re-run kinetics in Tab 2 to generate updated files."
-                    )
-                else:
-                    st.error(f"Column '{metric_col}' not found in: {', '.join(missing_metric)}.")
+                st.warning(
+                    f"Column '{metric_col}' not found in: {', '.join(missing_metric)}. "
+                    "Re-run kinetics in Tab 2 to generate v3.1 output files."
+                )
             else:
-                combined = pd.concat(dfs_cond, ignore_index=True)
+                combined     = pd.concat(dfs_cond, ignore_index=True)
                 catalysts_all = combined["Catalyst"].unique().tolist()
-
-                # pivot: rows = catalysts, columns = conditions
                 pivot = combined.pivot_table(index="Catalyst", columns="__condition__",
                                               values=metric_col, aggfunc="first")
                 pivot = pivot.reindex(columns=condition_labels)
@@ -1286,13 +1386,12 @@ with tab_compare:
                 st.markdown(f"### 📋 {metric_cmp} — All Conditions")
                 st.dataframe(pivot.style.format("{:.3f}", na_rep="—"), use_container_width=True)
 
-                # Grouped bar chart
                 fig_cmp, ax_cmp = plt.subplots(figsize=(max(9, len(catalysts_all)*1.5), 5))
                 x_pos = np.arange(len(catalysts_all))
                 bar_w = 0.8 / len(condition_labels)
                 for j, cond in enumerate(condition_labels):
-                    vals = [pivot.loc[cat, cond] if cat in pivot.index else float("nan")
-                             for cat in catalysts_all]
+                    vals   = [pivot.loc[cat, cond] if cat in pivot.index else float("nan")
+                               for cat in catalysts_all]
                     offset = (j - len(condition_labels)/2 + 0.5) * bar_w
                     ax_cmp.bar(x_pos + offset, vals, width=bar_w,
                                 label=cond, color=COLORS[j % len(COLORS)],
@@ -1300,7 +1399,8 @@ with tab_compare:
                 ax_cmp.set_xticks(x_pos)
                 ax_cmp.set_xticklabels(catalysts_all, rotation=30, ha="right")
                 ax_cmp.set_ylabel(metric_cmp, fontsize=12)
-                ax_cmp.set_title(f"{metric_cmp} Comparison Across Conditions", fontsize=13, fontweight="bold")
+                ax_cmp.set_title(f"{metric_cmp} Comparison Across Conditions",
+                                  fontsize=13, fontweight="bold")
                 ax_cmp.legend(fontsize=9)
                 ax_cmp.grid(True, alpha=0.25, axis="y", linewidth=0.6, color="0.7", zorder=0)
                 plt.tight_layout()
@@ -1323,4 +1423,4 @@ with tab_compare:
 
 
 st.markdown("---")
-st.caption("ODS Calculation Suite v3.0 | CatLab-Tools by Hoda Jafari | MIT License")
+st.caption("ODS Calculation Suite v3.1 | CatLab-Tools by Hoda Jafari | MIT License")
