@@ -108,14 +108,66 @@ $$TON = \frac{n_{substrate,\,converted}}{n_{active\,sites}} \qquad TOF\,(h^{-1})
 
 ---
 
-## 📦 Supported Units
+## 📦 Supported Units & Concentration Logic
 
-| Unit | Notes | MW Required? |
-|------|-------|:---:|
-| `ppmS` | ppm Sulfur — MW_S = 32.06 auto-applied | No |
-| `ppm` / `mg/L` | Aqueous pollutant | ✅ |
-| `mmol/L` / `mol/L` | Molar concentration | No |
-| `g/L` | Grams per litre | ✅ |
+CatLab-Tools accepts two fundamentally different concentration conventions.  
+Choosing the correct one determines how C₀ (mol/L) is internally computed.
+
+### ppmS vs ppm — Key Distinction
+
+| Feature | `ppmS` | `ppm` / `mg/L` |
+|---------|--------|----------------|
+| **What is measured** | Mass of **sulfur atom** | Mass of the **pollutant molecule** |
+| **Typical context** | Real fuel desulfurization (diesel, jet fuel, regardless of sulfur compound type) | Aqueous systems; model fuel with known pure compound |
+| **MW used in conversion** | MW_S = 32.06 g/mol (fixed, auto-applied) | MW of the compound (e.g. MW_DBT = 184.26 g/mol) |
+| **MW input required?** | ❌ No | ✅ Yes |
+| **Unit definition** | mg S / kg fuel (mass fraction × 10⁻³) | mg compound / L solution |
+
+### Conversion Formulae
+
+**When input is `ppmS`** — sulfur atom mass is the reference; fuel density converts mass fraction to volumetric:
+
+$$C_0\,[\text{mol/L}] = \frac{C_{ppmS}\,[\text{mg S / kg}] \times \rho_{\text{fuel}}\,[\text{g/mL}]}{MW_S\,[\text{g/mol}]} \times 10^{-3}$$
+
+> MW_S = 32.06 g/mol is applied automatically — you never need the MW of DBT or any other compound to reach mol/L.  
+> If you need the equivalent mass concentration of the model compound (e.g. DBT):
+> $$C_0^{DBT}\,[\text{mg/L}] = C_0\,[\text{mol/L}] \times MW_{DBT}\,[\text{g/mol}] \times 10^3$$
+
+**When input is `ppm` / `mg/L`** — pollutant molecule mass is the reference:
+
+$$C_0\,[\text{mol/L}] = \frac{C_{ppm}\,[\text{mg/L}]}{MW_{\text{compound}}\,[\text{g/mol}] \times 10^3}$$
+
+> MW of the compound (e.g. DBT, naphthalene, 4-methyldibenzothiophene) must be provided by the user.
+
+### Full Unit Support Table
+
+| Unit | Conversion basis | MW Required? |
+|------|-----------------|:---:|
+| `ppmS` | mg **S atom** / kg fuel → mol/L via MW_S | ❌ |
+| `ppm` / `mg/L` | mg **compound** / L → mol/L via MW_compound | ✅ |
+| `mmol/L` | Direct × 10⁻³ | ❌ |
+| `mol/L` | Direct | ❌ |
+| `g/L` | ÷ MW_compound → mol/L | ✅ |
+
+---
+
+## 🧪 Example: ECODS Experimental Conditions
+
+> Constant-voltage electrochemical ODS experiment with DBT in n-heptane model fuel.  
+> Input unit: **ppmS** (sulfur-based) — concentration is fuel-type-independent; MW_S is auto-applied.
+
+| Parameter | Value | Unit | Notes |
+|-----------|-------|------|-------|
+| Initial sulfur concentration (C₀) | 250 | ppmS (mg S / kg fuel) | Fuel-type independent |
+| Model solvent | n-Heptane | — | Density: 0.684 g/mL at 25 °C |
+| Solvent density (ρ) | 0.684 | g/mL | Used in ppmS → mol/L conversion |
+| MW of Sulfur | 32.06 | g/mol | Auto-applied; no user input needed |
+| MW of Dibenzothiophene (DBT) | 184.26 | g/mol | Used only for mg DBT/L back-conversion |
+| **C₀ (mol/L)** | **0.005334** | mol/L | 250 × 0.684 / 32.06 × 10⁻³ |
+| C₀ (as mg DBT/L) | 982.8 | mg/L | 0.005334 × 184.26 × 10³ |
+| Fuel volume | 2 | mL | — |
+| Catalyst mass | 5 | mg | — |
+| Catalyst-to-fuel ratio | 2.5 | g/L | m_cat (g) / V_fuel (L) |
 
 ---
 
