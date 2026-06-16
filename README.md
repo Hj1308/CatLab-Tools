@@ -70,6 +70,39 @@ $$SE_k = \sqrt{[\Sigma^{-1}]_{kk}}$$
 | Elovich | $r_0 = \alpha$ |
 | L-H | $r_0 = k_{LH} K C_0 / (1 + K C_0)$ |
 
+## 🔄 Reusability (Tab 4)
+
+Evaluates how well the catalyst retains its desulfurization activity over successive reuse cycles.
+
+**Formula:**
+
+$$\text{Retention}(\%) = \frac{X_{\text{cycle}\,n}}{X_{\text{cycle}\,1}} \times 100$$
+
+**Where:**
+
+| Symbol | Description |
+|--------|-------------|
+| $X_{\text{cycle}\,n}$ | Sulfur removal (%) measured at cycle $n$ |
+| $X_{\text{cycle}\,1}$ | Sulfur removal (%) at the first (reference) cycle |
+| Retention (%) | Catalytic activity retained relative to fresh catalyst |
+
+**Required input columns (Excel template):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `Cycle` | integer | Cycle number (1, 2, 3, ...) |
+| `Removal (%)` | float | Measured sulfur removal at each cycle |
+
+> **Important:** The template must contain **exactly 2 columns**: `Cycle` and `Removal (%)`. Cycle 1 is taken as the 100% reference automatically.
+
+**Example output:**
+
+| Cycle | Removal (%) | Retention (%) |
+|-------|-------------|---------------|
+| 1 | 92.0 | 100.00 |
+| 2 | 88.5 | 96.20 |
+| 3 | 85.1 | 92.50 |
+| 4 | 80.3 | 87.28 |
 ---
 
 ## 💧 Oxidant Efficiency (Tab 6)
