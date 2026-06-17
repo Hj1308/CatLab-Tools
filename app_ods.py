@@ -884,40 +884,57 @@ def _tab_linearization(cfg, uploaded):
     t = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    model_choice = st.selectbox("Linearization model", [
-        "Pseudo-first (ln C vs t)", "Second-order (1/C vs t)",
-        "Zero-order (C vs t)", "Elovich (C vs ln t)"])
-    n_cols = len(removal_cols)
-    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 4), squeeze=False)
-    for ci, col in enumerate(removal_cols):
-        removal = df[col].dropna().values[:len(t)].astype(float)
-        Ct = C0 * (1 - removal / 100.0)
-        ax = axes[0][ci]; color = COLORS[ci % len(COLORS)]
-        if "Pseudo-first" in model_choice:
-            valid = Ct > 0; x_vals = t[valid]; y_vals = np.log(Ct[valid])
-            ax.set_xlabel("Time (min)"); ax.set_ylabel("ln C")
-        elif "Second-order" in model_choice:
-            valid = Ct > 0; x_vals = t[valid]; y_vals = 1.0 / Ct[valid]
-            ax.set_xlabel("Time (min)"); ax.set_ylabel("1/C (L/mol)")
-        elif "Zero-order" in model_choice:
-            x_vals = t; y_vals = Ct
-            ax.set_xlabel("Time (min)"); ax.set_ylabel("C (mol/L)")
-        else:
-            valid = t > 0; x_vals = np.log(t[valid]); y_vals = Ct[valid]
-            ax.set_xlabel("ln t"); ax.set_ylabel("C (mol/L)")
-        ax.scatter(x_vals, y_vals, color=color, zorder=5)
-        if len(x_vals) >= 2:
+
+    lin_models = [
+        ("Zero-order  |  C vs t",       "Time (min)", "C (mol/L)",
+         lambda t_, Ct: (t_, Ct)),
+        ("Pseudo-first  |  ln C vs t",  "Time (min)", "ln C",
+         lambda t_, Ct: (t_[Ct > 0], np.log(Ct[Ct > 0]))),
+        ("Second-order  |  1/C vs t",   "Time (min)", "1/C (L/mol)",
+         lambda t_, Ct: (t_[Ct > 0], 1.0 / Ct[Ct > 0])),
+        ("Elovich  |  C vs ln t",       "ln t",       "C (mol/L)",
+         lambda t_, Ct: (np.log(t_[t_ > 0]), Ct[t_ > 0])),
+    ]
+
+    summary_rows = []
+    for model_title, x_lbl, y_lbl, transform in lin_models:
+        st.markdown(f"### {model_title}")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        for ci, col in enumerate(removal_cols):
+            removal = df[col].dropna().values[:len(t)].astype(float)
+            Ct = C0 * (1 - removal / 100.0)
+            color  = COLORS[ci % len(COLORS)]
+            marker = MARKERS[ci % len(MARKERS)]
             try:
+                x_vals, y_vals = transform(t, Ct)
+                if len(x_vals) < 2:
+                    continue
+                ax.scatter(x_vals, y_vals, color=color, marker=marker,
+                           s=60, zorder=5, label=col)
                 coeffs = np.polyfit(x_vals, y_vals, 1)
                 x_fit  = np.linspace(x_vals.min(), x_vals.max(), 100)
-                ax.plot(x_fit, np.polyval(coeffs, x_fit), "--", color=color)
+                ax.plot(x_fit, np.polyval(coeffs, x_fit), "--",
+                        color=color, lw=1.5, alpha=0.8)
                 r2_lin = _r2(y_vals, np.polyval(coeffs, x_vals))
-                ax.set_title(f"{col}\nslope={coeffs[0]:.4f}, R²={r2_lin:.4f}")
-            except Exception as e:
-                ax.set_title(f"{col}\nLinear fit failed: {e}")
-        else:
-            ax.set_title(f"{col}\n(insufficient valid points)")
-    fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+                summary_rows.append({
+                    "Model":     model_title.split("|")[0].strip(),
+                    "Catalyst":  col,
+                    "slope":     round(coeffs[0], 6),
+                    "intercept": round(coeffs[1], 6),
+                    "R²":       round(r2_lin, 4),
+                })
+            except Exception:
+                continue
+        ax.set_xlabel(x_lbl); ax.set_ylabel(y_lbl)
+        ax.set_title(model_title, fontweight="bold")
+        ax.legend(fontsize=9)
+        fig.tight_layout()
+        st.pyplot(fig); plt.close(fig)
+
+    if summary_rows:
+        st.markdown("---")
+        st.markdown("### 📋 Linearization Summary")
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -954,32 +971,146 @@ def _tab_removal(cfg, uploaded):
 # ════════════════════════════════════════════════════════════════
 # TAB 4 — TON / TOF
 # ════════════════════════════════════════════════════════════════
+
+# ρ_site presets (µmol/m²) per material family
+_SITE_DENSITY_PRESETS = {
+    "Metal oxides (MoO₃, V₂O₅, WO₃, TiO₂)":         {"rho": 2.0,  "range": "1–5",   "method": "NH₃-TPD or H₂-TPR"},
+    "Zeolites (ZSM-5, USY, Beta, SAPO)":               {"rho": 5.0,  "range": "2–10",  "method": "Pyridine-FTIR or NH₃-TPD"},
+    "Polyoxometalates (POM, HPW, PMo)":                {"rho": 1.0,  "range": "0.5–3", "method": "Formula-based or ³¹P NMR"},
+    "Graphene / rGO / GO":                             {"rho": 1.5,  "range": "0.5–4", "method": "Boehm titration or XPS O/C"},
+    "g-C₃N₄ / Carbon nitride":                        {"rho": 3.0,  "range": "1–6",   "method": "NH₃-TPD or XPS N 1s"},
+    "N-doped carbon / N-graphene":                     {"rho": 2.5,  "range": "1–5",   "method": "XPS N content × BET"},
+    "MOF-derived porous carbon":                       {"rho": 2.0,  "range": "0.5–4", "method": "Boehm titration or CO₂-TPD"},
+    "Supported metal nanoparticles (Pd, Pt, Au)":      {"rho": 0.5,  "range": "0.1–2", "method": "CO chemisorption or TEM dispersion"},
+    "Custom (enter manually)":                         {"rho": None, "range": "—",     "method": "User-defined"},
+}
+
 def _tab_ton_tof(cfg, uploaded):
     st.header("⚗️ Tab 4 — TON & TOF")
     st.markdown("""
 **Definitions:**
-- TON = n_DBT_converted / n_active_sites
-- TOF (min⁻¹) = TON / t_reaction
+- **TON** = n_substrate_converted / n_active_sites &nbsp;(dimensionless)
+- **TOF** (min⁻¹) = TON / t_reaction
+- **n_active_sites** can be entered directly (Option 1) or estimated from BET + material type (Option 2)
     """)
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
-    t = df[time_col].dropna().values.astype(float)
+    t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]; V = cfg["V_fuel"]; m = cfg["m_cat"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    site_density = st.number_input("Active site density (mmol/g catalyst)",
-                                   min_value=0.001, value=0.5, step=0.05)
-    n_sites = site_density * 1e-3 * m
+
+    method_choice = st.radio(
+        "How to define active site density?",
+        ["Option 1 — Direct input (from TPD / TPR / chemisorption / titration)",
+         "Option 2 — Estimate from BET surface area + material type"],
+        horizontal=True)
+
+    # ── Option 1: direct mmol/g ───────────────────────────────────
+    if "Option 1" in method_choice:
+        st.markdown("#### Direct input")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            site_density = st.number_input(
+                "Active site density (mmol/g catalyst)",
+                min_value=0.0001, value=0.5, step=0.05,
+                help="From NH₃-TPD, H₂-TPR, CO chemisorption, Boehm titration, etc.")
+        with col_b:
+            char_method = st.selectbox(
+                "Characterisation method used",
+                ["NH₃-TPD", "H₂-TPR", "CO chemisorption",
+                 "Pyridine-FTIR", "Boehm titration",
+                 "XPS", "³¹P NMR (POM)", "Formula-based", "Other"])
+        n_sites_mol = site_density * 1e-3 * m
+        st.info(f"n_active_sites = **{n_sites_mol*1e6:.3f} µmol** "
+                f"({site_density} mmol/g × {m} g catalyst) — method: {char_method}")
+
+    # ── Option 2: BET-based ───────────────────────────────────────
+    else:
+        st.markdown("#### BET-based estimation")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            s_bet = st.number_input("BET surface area (m²/g)",
+                                    min_value=0.1, value=100.0, step=10.0)
+            mat_type = st.selectbox("Material family", list(_SITE_DENSITY_PRESETS.keys()))
+
+        preset = _SITE_DENSITY_PRESETS[mat_type]
+        with col_b:
+            if preset["rho"] is not None:
+                rho_default = float(preset["rho"])
+                st.markdown(f"""
+**Typical ρ_site for {mat_type.split('(')[0].strip()}:**
+- Range: **{preset["range"]} µmol/m²**
+- Recommended method: *{preset["method"]}*
+                """)
+            else:
+                rho_default = 1.0
+                st.markdown("Enter your own ρ_site value below.")
+
+            rho_site = st.number_input(
+                "ρ_site — active site surface density (µmol/m²)",
+                min_value=0.01, value=rho_default, step=0.1,
+                help="Override the preset if you have measured this value.")
+
+        # n_sites = S_BET (m²/g) × m (g) × ρ_site (µmol/m²) → mol
+        n_sites_mol = s_bet * m * rho_site * 1e-6
+        site_density_equiv = (n_sites_mol * 1e3) / m if m > 0 else float("nan")
+        st.info(
+            f"n_active_sites = S_BET × m × ρ_site = "
+            f"{s_bet} × {m} × {rho_site} µmol/m² = "
+            f"**{n_sites_mol*1e6:.3f} µmol** "
+            f"(≡ {site_density_equiv:.4f} mmol/g)")
+        with st.expander("ℹ️ How ρ_site is estimated per material family", expanded=False):
+            st.markdown("""
+| Material | ρ_site (µmol/m²) | Basis |
+|----------|-----------------|-------|
+| Metal oxides (MoO₃, V₂O₅, WO₃) | 1–5 | NH₃-TPD acid sites; terminal M=O counted as active |
+| Zeolites (ZSM-5, USY, Beta) | 2–10 | Pyridine-FTIR Brønsted + Lewis; strong acid sites for ODS |
+| POMs (HPW, PMo) | 0.5–3 | Keggin unit density on support; ³¹P NMR quantification |
+| Graphene / rGO / GO | 0.5–4 | Boehm titration (COOH + C=O + OH groups); XPS O/C ratio |
+| g-C₃N₄ / carbon nitride | 1–6 | Pyridinic + pyrrolic N from XPS N 1s; NH₃-TPD base sites |
+| N-doped carbon / N-graphene | 1–5 | XPS N atomic % × BET; pyridinic N as primary active site |
+| MOF-derived porous carbon | 0.5–4 | Boehm titration; CO₂-TPD for basic sites |
+| Supported metals (Pd, Pt, Au) | 0.1–2 | CO chemisorption dispersion; TEM particle size → metal surface |
+
+> **Note:** These are literature-based estimates. If you have measured site density directly (TPD, TPR, chemisorption), use **Option 1** for higher accuracy.
+            """)
+
+    # ── Shared calculation ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📋 TON & TOF Results")
+    if n_sites_mol <= 0:
+        st.error("n_active_sites = 0. Check your inputs."); return
+
     rows = []
     for col in removal_cols:
         removal = df[col].dropna().values[:len(t)].astype(float)
-        n_conv = C0 * V * (removal[-1] / 100.0); t_rxn = t[-1]
-        ton = n_conv / n_sites if n_sites > 0 else float("nan")
+        X_final = removal[-1] / 100.0
+        n_conv  = C0 * V * X_final          # mol
+        t_rxn   = t[-1]                     # min
+        ton = n_conv / n_sites_mol
         tof = ton / t_rxn if t_rxn > 0 else float("nan")
-        rows.append({"Catalyst": col, "n_conv (µmol)": round(n_conv * 1e6, 3),
-                     "TON": round(ton, 2) if not np.isnan(ton) else "N/A",
-                     "TOF (min⁻¹)": f"{tof:.4f}" if not np.isnan(tof) else "N/A"})
+        rows.append({
+            "Catalyst":       col,
+            "X_final (%)":    round(removal[-1], 1),
+            "n_conv (µmol)":  round(n_conv * 1e6, 3),
+            "n_sites (µmol)": round(n_sites_mol * 1e6, 3),
+            "TON":            round(ton, 3),
+            "TOF (min⁻¹)":    f"{tof:.5f}" if not np.isnan(tof) else "N/A",
+            "TOF (h⁻¹)":      f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
+        })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+    # Bar chart TOF comparison
+    if len(rows) > 1:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        cats  = [r["Catalyst"] for r in rows]
+        tofs  = [float(r["TOF (h⁻¹)"]) if r["TOF (h⁻¹)"] != "N/A" else 0 for r in rows]
+        bars  = ax.bar(cats, tofs, color=COLORS[:len(cats)],
+                       edgecolor="black", linewidth=0.8)
+        ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=9)
+        ax.set_ylabel("TOF (h⁻¹)"); ax.set_title("Turnover Frequency Comparison")
+        fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
 
 # ════════════════════════════════════════════════════════════════
