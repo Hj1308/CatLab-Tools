@@ -334,21 +334,40 @@ def _fmt_pm(val, se):
 # ── FIX I: Centralised data loader ──────────────────────────────
 def _load_kinetic_data(uploaded):
     try:
-        if uploaded.name.endswith(".xlsx"):
-            df = pd.read_excel(uploaded)
+        if uploaded.name.endswith(".xlsx") or uploaded.name.endswith(".xls"):
+            xl = pd.ExcelFile(uploaded)
+            # Try Raw_Data sheet first, then search all sheets for Time column
+            target_sheet = None
+            if "Raw_Data" in xl.sheet_names:
+                target_sheet = "Raw_Data"
+            else:
+                for sh in xl.sheet_names:
+                    cols = pd.read_excel(uploaded, sheet_name=sh, nrows=1).columns.tolist()
+                    if any("time" in str(c).lower() for c in cols):
+                        target_sheet = sh
+                        break
+            if target_sheet is None:
+                st.error("No sheet with a 'Time' column found. Expected a 'Raw_Data' sheet.")
+                return None, None, None
+            df = pd.read_excel(uploaded, sheet_name=target_sheet)
         else:
             df = pd.read_csv(uploaded)
     except Exception as e:
         st.error(f"Cannot read file: {e}")
         return None, None, None
-    time_col = [c for c in df.columns if "time" in c.lower()]
+    # Find time column
+    time_col = [c for c in df.columns if "time" in str(c).lower()]
     if not time_col:
         st.error("No 'Time' column found.")
         return None, None, None
     time_col = time_col[0]
-    removal_cols = [c for c in df.columns if "removal" in c.lower()]
+    # Find removal columns — named "Removal" OR any numeric column that isn't Time
+    removal_cols = [c for c in df.columns if "removal" in str(c).lower()]
     if not removal_cols:
-        st.error("No 'Removal (%)' column(s) found.")
+        removal_cols = [c for c in df.columns
+                        if c != time_col and pd.api.types.is_numeric_dtype(df[c])]
+    if not removal_cols:
+        st.error("No data columns found. Add catalyst removal (%) columns next to Time.")
         return None, None, None
     return df, time_col, removal_cols
 
