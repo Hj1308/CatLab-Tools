@@ -433,12 +433,15 @@ def _fit_nonlinear(time, Ct, C0):
         se = np.sqrt(np.diag(pcov)); k_LH = p[0]; K_ads = p[1]
         pred = _lh_model(t, k_LH, K_ads, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["L-H"]
         r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
+        _kc = K_ads * C0
+        _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
         results["L-H"] = {
             "params": (k_LH, K_ads, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
             "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
             "t_half": _lh_t_half(C0, k_LH, K_ads),
             "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)", "r0": r0, "r0_se": None,
+            "K_ads": K_ads, "K_se": se[1], "regime": _regime,
         }
     except Exception as e:
         results["L-H"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
@@ -799,6 +802,7 @@ def _tab_kinetics(cfg, uploaded):
                      "R²": br.get("R2","N/A"), "Adj-R²": br.get("adj_r2","N/A"),
                      "AIC": br.get("aic","N/A"), "t½ (min)": _fmt_thalf(t_half),
                      "r₀ (mol/L/min)": _fmt_sci(r0), "r₀/m (mol/g/min)": _fmt_sci(r0_m),
+                     "L-H Regime": br.get("regime", "–") if best == "L-H" else "–",
                      "Note": warn_str})
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
     with st.expander("🔍 All models for each catalyst", expanded=False):
