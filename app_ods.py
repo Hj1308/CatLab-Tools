@@ -109,11 +109,15 @@ R_GAS  = 8.314   # J/(mol·K)
 COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
 MARKERS = ["o","s","^","D","v","P","*","X","h"]
 N_PARAMS = {
-    "Zero-order":   1,
-    "Pseudo-first": 1,
-    "Second-order": 1,
-    "Elovich":      2,
-    "L-H":          2,
+    "Zero-order":         1,
+    "Pseudo-first":       1,
+    "Second-order":       1,
+    "Elovich":            2,
+    "L-H":                2,
+    "Power-Law":          2,
+    "Eley-Rideal":        2,
+    "Avrami":             2,
+    "Double-Exponential": 4,
 }
 
 # FIX B: added n_sulfur field
@@ -203,7 +207,46 @@ def _lh_model(t, k_LH, K_ads, C0):
     t_full = np.concatenate(([0.0], t))
     sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
     return np.maximum(sol.flatten()[1:], 0.0)
+# ── Additional Non-Linear Kinetic Models (v3.5.0) ──────────────
 
+def _power_law(t, k, n, C0):
+    """Power-Law: -dC/dt = k·Cⁿ  (integrated form)"""
+    t = np.asarray(t, dtype=float)
+    n = np.clip(n, 0.1, 5.0)
+    if abs(n - 1.0) < 1e-5:
+        return C0 * np.exp(-k * t)
+    exponent = 1.0 - n
+    inside = C0**exponent - k * exponent * t
+    inside = np.maximum(inside, 1e-12)
+    return inside ** (1.0 / exponent)
+
+def _power_law_t_half(C0, k, n):
+    try:
+        if abs(n - 1.0) < 1e-5:
+            return round(np.log(2) / k, 4)
+        return round(C0**(1-n) * (2**(n-1) - 1) / (k * (n - 1)), 4)
+    except Exception:
+        return float("nan")
+
+def _eley_rideal(t, k_er, K, C0):
+    """Eley-Rideal: one species adsorbed, other reacts from bulk phase"""
+    t = np.asarray(t, dtype=float)
+    def dC(C, tt):
+        Cv = max(float(C[0]), 1e-12)
+        return [-k_er * K * Cv]
+    t_full = np.concatenate(([0.0], t))
+    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
+    return np.maximum(sol.flatten()[1:], 0.0)
+
+def _avrami(t, k_av, n_av, C0):
+    """Avrami (Johnson-Mehl-Avrami): C(t) = C₀·exp(−k·tⁿ)"""
+    t = np.asarray(t, dtype=float)
+    return C0 * np.exp(-k_av * t**n_av)
+
+def _double_exponential(t, k1, k2, A, C0):
+    """Double Exponential: fast + slow parallel decay"""
+    t = np.asarray(t, dtype=float)
+    return C0 * (A * np.exp(-k1 * t) + (1.0 - A) * np.exp(-k2 * t))
 
 # ── Statistical helpers ──────────────────────────────────────────
 def _r2(y_obs, y_pred):
@@ -399,6 +442,87 @@ def _fit_nonlinear(time, Ct, C0):
         }
     except Exception as e:
         results["L-H"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+    # ── Power-Law (General Reaction Order) ──────────────────────
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, n: _power_law(t_, k, n, C0),
+            t, Ct, p0=[0.01, 1.5],
+            bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); k_pl, n_pl = p
+        pred = _power_law(t, k_pl, n_pl, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Power-Law"]
+        r0 = k_pl * (C0 ** n_pl)
+        results["Power-Law"] = {
+            "params": (k_pl, n_pl, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
+            "t_half": _power_law_t_half(C0, k_pl, n_pl),
+            "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
+            "col_k": "k_PL", "r0": r0, "r0_se": None,
+        }
+    except Exception as e:
+        results["Power-Law"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+
+    # ── Eley-Rideal ───────────────────────────────────────────────
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, K: _eley_rideal(t_, k, K, C0),
+            t, Ct, p0=[0.01, 10.0],
+            bounds=([0, 0], [np.inf, np.inf]), maxfev=8000)
+        se = np.sqrt(np.diag(pcov)); k_er, K_er = p
+        pred = _eley_rideal(t, k_er, K_er, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Eley-Rideal"]
+        r0 = k_er * K_er * C0
+        results["Eley-Rideal"] = {
+            "params": (k_er, K_er, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
+            "t_half": float("nan"),
+            "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
+            "col_k": "k_ER", "r0": r0, "r0_se": None,
+        }
+    except Exception as e:
+        results["Eley-Rideal"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+
+    # ── Avrami ───────────────────────────────────────────────────
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, n: _avrami(t_, k, n, C0),
+            t, Ct, p0=[0.01, 1.0],
+            bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000)
+        se = np.sqrt(np.diag(pcov)); k_av, n_av = p
+        pred = _avrami(t, k_av, n_av, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Avrami"]
+        results["Avrami"] = {
+            "params": (k_av, n_av, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
+            "t_half": float("nan"),
+            "k": k_av, "k_se": se[0],
+            "col_k": "k_Avrami", "r0": None, "r0_se": None,
+        }
+    except Exception as e:
+        results["Avrami"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+
+    # ── Double Exponential ───────────────────────────────────────
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
+            t, Ct, p0=[0.1, 0.01, 0.6],
+            bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); k1, k2, A_frac = p
+        pred = _double_exponential(t, k1, k2, A_frac, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Double-Exponential"]
+        results["Double-Exponential"] = {
+            "params": (k1, k2, A_frac, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
+            "t_half": float("nan"),
+            "k": k1, "k_se": se[0],
+            "col_k": "k1 (fast)", "r0": None, "r0_se": None,
+        }
+    except Exception as e:
+        results["Double-Exponential"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
 
     return results
 
