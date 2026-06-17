@@ -36,6 +36,10 @@ v3.4 — New modules
 NEW N: Tab 8 — Arrhenius Multi-Temperature Analysis (upload per-T files, extract Ea & A with 95% CI)
 NEW O: Tab 9 — Residual Diagnostics (residuals vs time, vs fitted, Q-Q plot, Shapiro-Wilk, runs test)
 
+v3.4.1 — Template & UX improvements
+NEW P: create_advanced_template() — generates Excel template pre-filled with sidebar settings
+NEW Q: Tab 1 template expander upgraded — dual download buttons (simple + advanced template)
+
 Scientific references:
   - Barghi et al., ACS Omega 2025, 10, 15947. DOI: 10.1021/acsomega.4c06722
   - Dhir et al., J. Hazard. Mater. 2009, 161, 1360. DOI: 10.1016/j.jhazmat.2008.04.099
@@ -63,7 +67,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
 # ── Page config (must be first Streamlit call) ─────────────────
-st.set_page_config(page_title="ODS Calculation Suite v3.4", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="ODS Calculation Suite v3.4.1", page_icon="🔬", layout="wide")
 
 # ── Matplotlib style ────────────────────────────────────────────
 plt.rcParams.update({
@@ -474,6 +478,87 @@ def _sidebar_settings():
     }
 
 
+# ════════════════════════════════════════════════════════════════
+# NEW P (v3.4.1): Advanced Template Generator
+# ════════════════════════════════════════════════════════════════
+def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.xlsx"):
+    """Create advanced Excel template with Metadata sheet populated from sidebar settings."""
+
+    # Sheet 1: Metadata
+    metadata = {
+        "Parameter": [
+            "sample_name", "catalyst_name", "substrate", "c0_value", "c0_unit",
+            "mw_pollutant", "n_sulfur", "fuel_solvent", "rho_g_per_mL",
+            "V_fuel_mL", "m_cat_mg", "temperature_C", "O_S_ratio",
+            "active_sites_mmol_g", "notes"
+        ],
+        "Value": [
+            "DBT-Test-01",
+            cfg.get("substrate_name", "MoS2"),
+            cfg.get("substrate_name", "DBT"),
+            cfg.get("c0_val", 500),
+            cfg.get("c0_unit", "ppmS"),
+            cfg.get("mw_poll", 184.26),
+            cfg.get("n_sulfur", 1),
+            cfg.get("solvent_name", "n-Heptane"),
+            cfg.get("rho", 0.684),
+            round(cfg.get("V_fuel", 0.01) * 1000, 1),
+            round(cfg.get("m_cat", 0.01) * 1000, 1),
+            cfg.get("temp_C", 60),
+            cfg.get("O_S", 4.0),
+            0.5,
+            "My experimental ODS data"
+        ],
+        "Unit/Description": [
+            "-", "-", "-", "-", "-", "g/mol", "-", "-", "g/mL",
+            "mL", "mg", "°C", "-", "mmol/g", "-"
+        ]
+    }
+    df_meta = pd.DataFrame(metadata)
+
+    # Sheet 2: Raw_Data
+    df_raw = pd.DataFrame({
+        "Time (min)": [0, 15, 30, 45, 60, 90, 120, 180, 240],
+        "Cat-A Removal (%)": [0, 18, 35, 52, 68, 82, 91, 96, 98],
+        "Cat-B Removal (%)": [0, 22, 41, 59, 74, 87, 94, 97, 99],
+        "Notes": [""] * 9
+    })
+
+    # Sheet 3: Instructions
+    instructions = pd.DataFrame({
+        "Instructions": [
+            "1. Review and edit the Metadata sheet if needed (settings from sidebar are pre-filled).",
+            "2. Fill Time (min) and Removal (%) columns in the Raw_Data sheet with your experimental data.",
+            "3. Save the file and upload it in the app.",
+            "4. The app will convert units, fit multiple kinetic models (including second-order), and select the best one using AIC."
+        ]
+    })
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df_meta.to_excel(writer, sheet_name="Metadata", index=False)
+        df_raw.to_excel(writer, sheet_name="Raw_Data", index=False)
+        instructions.to_excel(writer, sheet_name="Instructions", index=False)
+
+        # Auto-adjust column widths
+        for sheet_name in writer.sheets:
+            worksheet = writer.sheets[sheet_name]
+            for col in worksheet.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except Exception:
+                        pass
+                adjusted_width = min(max_length + 2, 40)
+                worksheet.column_dimensions[column].width = adjusted_width
+
+    buf.seek(0)
+    return buf, filename
+
+
 # ── FIX D: Shared file uploader ──────────────────────────────────
 def _shared_uploader():
     st.markdown("### 📂 Data File")
@@ -492,16 +577,44 @@ def _shared_uploader():
 # ════════════════════════════════════════════════════════════════
 def _tab_kinetics(cfg, uploaded):
     st.header("📈 Tab 1 — Kinetic Fitting")
+
+    # NEW Q (v3.4.1): Upgraded dual-button template expander
     with st.expander("📋 Template & upload instructions", expanded=False):
-        tmpl = pd.DataFrame({
-            "Time (min)": [0,10,20,30,60,90,120],
-            "Cat-A Removal (%)": [0,15,28,40,65,80,91],
-            "Cat-B Removal (%)": [0,22,41,55,78,89,95],
-        })
-        buf = io.BytesIO(); tmpl.to_excel(buf, index=False)
-        st.download_button("⬇️ Download template (.xlsx)", buf.getvalue(),
-                           "ods_template.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.markdown("""
+**Required columns:**
+- `Time (min)` — reaction time
+- One or more catalyst columns with `Removal (%)` values (0–100)
+
+**Tips:**
+- Minimum 4-8 time points per catalyst
+- Include t=0 (Removal=0) if possible
+        """)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            # Simple template
+            tmpl = pd.DataFrame({
+                "Time (min)": [0, 10, 20, 30, 60, 90, 120],
+                "Cat-A Removal (%)": [0, 15, 28, 40, 65, 80, 91],
+                "Cat-B Removal (%)": [0, 22, 41, 55, 78, 89, 95],
+            })
+            buf = io.BytesIO()
+            tmpl.to_excel(buf, index=False)
+            st.download_button("⬇️ Download simple template", buf.getvalue(),
+                               "ods_simple_template.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        with col2:
+            if st.button("📋 Generate Advanced Template (with Metadata)", type="primary"):
+                buf, fname = create_advanced_template(cfg)
+                st.download_button(
+                    "⬇️ Download Advanced Template",
+                    buf.getvalue(),
+                    fname,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="adv_template"
+                )
+
     if uploaded is None:
         st.info("Upload a file above to begin fitting."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
@@ -1108,7 +1221,7 @@ def main():
 <div style='background:linear-gradient(90deg,#1a1a2e,#16213e);
             padding:18px 24px;border-radius:10px;margin-bottom:16px'>
   <h2 style='color:#e0e0e0;margin:0'>🔬 ODS Calculation Suite
-    <span style='font-size:0.6em;color:#aaa'> v3.4 — CatLab-Tools</span></h2>
+    <span style='font-size:0.6em;color:#aaa'> v3.4.1 — CatLab-Tools</span></h2>
   <p style='color:#aaa;margin:4px 0 0'>
     Oxidative Desulfurization Kinetics &amp; Analysis |
     Author: Hoda Jafari |
