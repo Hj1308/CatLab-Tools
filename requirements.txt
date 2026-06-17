@@ -4,3 +4,4 @@ matplotlib
 scipy
 openpyxl
 streamlit
+openai>=1.0.0
