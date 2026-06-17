@@ -746,7 +746,11 @@ def _tab_kinetics(cfg, uploaded):
     t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    [         "Zero-order", "Pseudo-first", "Second-order",         "Elovich", "L-H",         "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"     ]
+    model_names = [
+        "Zero-order", "Pseudo-first", "Second-order",
+        "Elovich", "L-H",
+        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+    ]
     all_results = {}
     for col in removal_cols:
         removal = df[col].dropna().values[:len(t)].astype(float)
@@ -763,7 +767,7 @@ def _tab_kinetics(cfg, uploaded):
         best_model = _best_model(res, model_names)
         if best_model is None: continue
         bres = res[best_model]; params = bres["params"]
-                if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
+        if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
         elif best_model == "Pseudo-first":        Ct_fit = _first_order(t_fine, params[0], C0)
         elif best_model == "Second-order":        Ct_fit = _second_order(t_fine, params[0], C0)
         elif best_model == "Elovich":             Ct_fit = _elovich(t_fine, params[0], params[1], C0)
@@ -826,7 +830,7 @@ def _tab_kinetics(cfg, uploaded):
             best_model = _best_model(res, model_names)
             if best_model is None: continue
             bres = res[best_model]; params = bres["params"]
-                        if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
+            if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
             elif best_model == "Pseudo-first":        Ct_fit = _first_order(t_fine, params[0], C0)
             elif best_model == "Second-order":        Ct_fit = _second_order(t_fine, params[0], C0)
             elif best_model == "Elovich":             Ct_fit = _elovich(t_fine, params[0], params[1], C0)
@@ -1127,7 +1131,11 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                             min_value=-20.0, max_value=200.0, value=25.0, step=5.0,
                             key=f"arr_T_{uf.name}")
         temps_C.append(T)
-    [         "Zero-order", "Pseudo-first", "Second-order",         "Elovich", "L-H",         "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"     ]
+    model_names = [
+        "Zero-order", "Pseudo-first", "Second-order",
+        "Elovich", "L-H",
+        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+    ]
     model_choice_arr = st.selectbox("Kinetic model for k extraction",
         ["Best (AIC)","Pseudo-first","Second-order","L-H"], index=0, key="arr_model_choice")
     if st.button("▶ Run Arrhenius Fitting", key="run_arrhenius"):
@@ -1238,7 +1246,11 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
     t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    [         "Zero-order", "Pseudo-first", "Second-order",         "Elovich", "L-H",         "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"     ]
+    model_names = [
+        "Zero-order", "Pseudo-first", "Second-order",
+        "Elovich", "L-H",
+        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+    ]
     col1, col2 = st.columns(2)
     with col1: cat_choice   = st.selectbox("Select catalyst", removal_cols, key="resid_cat")
     with col2: model_choice = st.selectbox("Select model",    model_names,  key="resid_model")
