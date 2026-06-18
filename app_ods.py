@@ -975,25 +975,26 @@ def _tab_kinetics(cfg, uploaded):
         return
 
     # ── Saturation info per catalyst ──────────────────────────────
-    for col in removal_cols:
-        if col not in all_results: continue
-        t_fit      = t_fit_per_cat[col]
-        excl_times = excl_per_cat[col]
-        if len(t_fit) >= 4 and not excl_times:
-            removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
-            # build array without last point
-            t_nl    = t_fit[:-1]
-            # rebuild Ct for these time points from raw data (excluding injected t=0)
-            t_nl_raw = t_nl[t_nl > 0] if (add_t0 and not has_t0) else t_nl
-            keep_nl  = np.array([ti in set(t_nl_raw) for ti in t_raw])
-            Ct_nl    = C0 * (1 - removal_raw[keep_nl] / 100.0)
-            if add_t0 and not has_t0:
-                t_nl2  = np.concatenate(([0.0], t_nl_raw))
-                Ct_nl2 = np.concatenate(([C0],  Ct_nl))
-            else:
-                t_nl2  = t_nl_raw
-                Ct_nl2 = Ct_nl
-            try:
+    try:
+        for col in removal_cols:
+            if col not in all_results: continue
+            t_fit_s    = t_fit_per_cat[col]
+            excl_times = excl_per_cat[col]
+            if len(t_fit_s) >= 4 and not excl_times:
+                removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
+                t_nl_raw = t_fit_s[t_fit_s > 0][:-1]  # all non-zero points except last
+                if len(t_nl_raw) < 2:
+                    continue
+                keep_nl = np.array([ti in set(t_nl_raw.tolist()) for ti in t_raw])
+                Ct_nl   = C0 * (1 - removal_raw[keep_nl] / 100.0)
+                if add_t0 and not has_t0:
+                    t_nl2  = np.concatenate(([0.0], t_nl_raw))
+                    Ct_nl2 = np.concatenate(([C0],  Ct_nl))
+                else:
+                    t_nl2  = t_nl_raw
+                    Ct_nl2 = Ct_nl
+                if len(t_nl2) < 3:
+                    continue
                 res_nl   = _fit_nonlinear(t_nl2, Ct_nl2, C0)
                 best_all = _best_model(all_results[col], model_names)
                 best_nl  = _best_model(res_nl, model_names)
@@ -1002,10 +1003,10 @@ def _tab_kinetics(cfg, uploaded):
                     st.info(
                         f"ℹ️ **{cat_label}**: best model changes "
                         f"**{best_all} → {best_nl}** when "
-                        f"t = {int(t_fit[-1])} min is excluded. "
+                        f"t = {int(t_fit_s[-1])} min is excluded. "
                         f"Possible saturation — consider excluding it above.")
-            except Exception:
-                pass
+    except Exception:
+        pass  # saturation detection is advisory only — never block main results
 
     # ── Helper: convert mol/L → user display unit ────────────────
     def _C_to_user(Ct_mol):
