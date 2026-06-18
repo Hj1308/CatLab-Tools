@@ -157,47 +157,54 @@ $$TON = \frac{n_{substrate,\,converted}}{n_{active\,sites}} \qquad TOF\,(h^{-1})
 
 ---
 
-## 📦 Supported Units & Concentration Logic
+## 📦 ## Supported Units & Concentration Logic
 
-CatLab-Tools accepts two fundamentally different concentration conventions.  
+CatLab-Tools accepts two fundamentally different concentration conventions.
 Choosing the correct one determines how C₀ (mol/L) is internally computed.
 
 ### ppmS vs ppm — Key Distinction
 
-| Feature | `ppmS` | `ppm` / `mg/L` |
-|---------|--------|----------------|
-| **What is measured** | Mass of **sulfur atom** | Mass of the **pollutant molecule** |
-| **Typical context** | Real fuel desulfurization (diesel, jet fuel, regardless of sulfur compound type) | Aqueous systems; model fuel with known pure compound |
-| **MW used in conversion** | MW_S = 32.06 g/mol (fixed, auto-applied) | MW of the compound (e.g. MW_DBT = 184.26 g/mol) |
-| **MW input required?** | ❌ No | ✅ Yes |
-| **Unit definition** | mg S / kg fuel (mass fraction × 10⁻³) | mg compound / L solution |
+| Feature | ppmS | ppm / mg/L |
+|---|---|---|
+| What is measured | Mass of sulfur atom | Mass of the pollutant molecule |
+| Typical context | Model fuel prepared by dissolving sulfur compound into a fixed volume of fuel | Aqueous systems; model fuel with known pure compound |
+| MW used in conversion | MW_S = 32.06 g/mol (fixed, auto-applied) | MW of the compound (e.g. MW_DBT = 184.26 g/mol) |
+| MW input required? | ❌ No | ✅ Yes |
+| Unit definition (default) | mg S / L fuel (volumetric — standard lab prep) | mg compound / L solution |
 
 ### Conversion Formulae
 
-**When input is `ppmS`** — sulfur atom mass is the reference; fuel density converts mass fraction to volumetric:
+**When input is `ppmS` — Volumetric basis (default):**
 
-$$C_0\,[\text{mol/L}] = \frac{C_{ppmS}\,[\text{mg S / kg}] \times \rho_{\text{fuel}}\,[\text{g/mL}]}{MW_S\,[\text{g/mol}]} \times 10^{-3}$$
+Standard lab preparation: sulfur compound dissolved into a fixed **volume** of fuel.
+No fuel density is needed.
+C₀ [mol/L] = C [mg S / L] / (MW_S [g/mol] × 10³)
+`MW_S = 32.06 g/mol` is applied automatically.
+**Example:** 250 ppmS → 250 / 32.06 / 1000 = **7.798 × 10⁻³ mol/L**
 
-> MW_S = 32.06 g/mol is applied automatically — you never need the MW of DBT or any other compound to reach mol/L.  
-> If you need the equivalent mass concentration of the model compound (e.g. DBT):
-> $$C_0^{DBT}\,[\text{mg/L}] = C_0\,[\text{mol/L}] \times MW_{DBT}\,[\text{g/mol}] \times 10^3$$
+If you need the equivalent molar concentration of the compound (e.g. DBT):
+C₀_DBT [mol/L] = C₀_S [mol/L] / n_sulfur
+where `n_sulfur` = number of S atoms per molecule (1 for DBT, BT, 4,6-DMDBT).
+
+> **Mass basis (advanced):** If your sulfur content is a true mass fraction
+> (mg S / kg fuel, e.g. from XRF or ASTM D5453), switch to **Mass basis**
+> in the sidebar. The fuel density ρ (g/mL) is then applied:
+> `C₀ = C [mg S/kg] × ρ [g/mL] / (MW_S × 10³)`
 
 **When input is `ppm` / `mg/L`** — pollutant molecule mass is the reference:
+C₀ [mol/L] = C [mg/L] / (MW_compound [g/mol] × 10³)
 
-$$C_0\,[\text{mol/L}] = \frac{C_{ppm}\,[\text{mg/L}]}{MW_{\text{compound}}\,[\text{g/mol}] \times 10^3}$$
-
-> MW of the compound (e.g. DBT, naphthalene, 4-methyldibenzothiophene) must be provided by the user.
+MW of the compound (e.g. DBT = 184.26 g/mol) must be provided by the user.
 
 ### Full Unit Support Table
 
 | Unit | Conversion basis | MW Required? |
-|------|-----------------|:---:|
-| `ppmS` | mg **S atom** / kg fuel → mol/L via MW_S | ❌ |
-| `ppm` / `mg/L` | mg **compound** / L → mol/L via MW_compound | ✅ |
-| `mmol/L` | Direct × 10⁻³ | ❌ |
-| `mol/L` | Direct | ❌ |
-| `g/L` | ÷ MW_compound → mol/L | ✅ |
-
+|---|---|---|
+| ppmS | mg S / L fuel → mol/L via MW_S (volumetric default) | ❌ |
+| ppm / mg/L | mg compound / L → mol/L via MW_compound | ✅ |
+| mmol/L | Direct × 10⁻³ | ❌ |
+| mol/L | Direct | ❌ |
+| g/L | ÷ MW_compound → mol/L | ✅ |
 ---
 
 ## 🧪 Example: ECODS Experimental Conditions
