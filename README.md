@@ -96,10 +96,14 @@ Active site density can be entered directly (mmol/g) or estimated from BET surfa
 
 ## 💧 Oxidant Efficiency (Tab 6)
 
-$$\eta_{H_2O_2}(\%) = \frac{n_{DBT,\,removed}}{n_{H_2O_2,\,consumed} / 2} \times 100$$
+**Formula:**
+η(H₂O₂) [%] = n(DBT removed) / [n(H₂O₂ consumed) / 2] × 100
 
 Stoichiometry: DBT + 2 H₂O₂ → DBTO₂ + 2 H₂O (1 : 2 molar ratio).
 
+- If H₂O₂ consumed is not measured, stoichiometric assumption is used:
+  `n(H₂O₂ consumed) = 2 × n(DBT removed)`
+- η ≈ 100% under stoichiometric assumption — measure actual H₂O₂ for meaningful η.
 ---
 
 ## 🌡️ Arrhenius Analysis (Tab 8)
