@@ -1210,36 +1210,44 @@ def _tab_linearization(cfg, uploaded):
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
-    t = df[time_col].dropna().values.astype(float)
+    t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
 
+    # Four classical linearized forms
     lin_models = [
-        ("Zero-order  |  C vs t",            "Time (min)", "C (mol/L)",
+        ("Zero-order  |  C vs t",
+         "Time (min)", "C (mol·L⁻¹)",
          lambda t_, Ct: (t_, Ct)),
-        ("Pseudo-first  |  ln C vs t",       "Time (min)", "ln C",
-         lambda t_, Ct: (t_[Ct > 0], np.log(Ct[Ct > 0]))),
-        ("Pseudo-second-order  |  1/C vs t", "Time (min)", "1/C (L/mol)",
+        ("Pseudo-first  |  ln(C₀/C) vs t",
+         "Time (min)", "ln(C₀/C)",
+         lambda t_, Ct: (t_[Ct > 0], np.log(C0 / np.maximum(Ct[Ct > 0], 1e-15)))),
+        ("Pseudo-second-order  |  1/C vs t",
+         "Time (min)", "1/C  (L·mol⁻¹)",
          lambda t_, Ct: (t_[Ct > 0], 1.0 / Ct[Ct > 0])),
-        ("Elovich  |  C vs ln t",            "ln t",       "C (mol/L)",
+        ("Elovich  |  C vs ln t",
+         "ln t", "C (mol·L⁻¹)",
          lambda t_, Ct: (np.log(t_[t_ > 0]), Ct[t_ > 0])),
     ]
 
+    # summary_rows collects one row per (model, catalyst)
     summary_rows = []
+
     for model_title, x_lbl, y_lbl, transform in lin_models:
         st.markdown(f"### {model_title}")
         fig, ax = plt.subplots(figsize=(8, 4))
         for ci, col in enumerate(removal_cols):
-            removal = df[col].dropna().values[:len(t)].astype(float)
-            Ct = C0 * (1 - removal / 100.0)
-            color  = COLORS[ci % len(COLORS)]
-            marker = MARKERS[ci % len(MARKERS)]
+            removal   = df[col].dropna().values[:len(t)].astype(float)
+            Ct        = C0 * (1 - removal / 100.0)
+            color     = COLORS[ci % len(COLORS)]
+            marker    = MARKERS[ci % len(MARKERS)]
+            cat_label = col.replace(" Removal (%)","").strip()
             try:
                 x_vals, y_vals = transform(t, Ct)
                 if len(x_vals) < 2:
                     continue
                 ax.scatter(x_vals, y_vals, color=color, marker=marker,
-                           s=60, zorder=5, label=col)
+                           s=60, zorder=5, label=cat_label)
                 coeffs = np.polyfit(x_vals, y_vals, 1)
                 x_fit  = np.linspace(x_vals.min(), x_vals.max(), 100)
                 ax.plot(x_fit, np.polyval(coeffs, x_fit), "--",
@@ -1247,10 +1255,10 @@ def _tab_linearization(cfg, uploaded):
                 r2_lin = _r2(y_vals, np.polyval(coeffs, x_vals))
                 summary_rows.append({
                     "Model":     model_title.split("|")[0].strip(),
-                    "Catalyst":  col,
+                    "Catalyst":  cat_label,
                     "slope":     round(coeffs[0], 6),
                     "intercept": round(coeffs[1], 6),
-                    "R²":       round(r2_lin, 4),
+                    "R²":        round(r2_lin, 4),
                 })
             except Exception:
                 continue
@@ -1260,10 +1268,42 @@ def _tab_linearization(cfg, uploaded):
         fig.tight_layout()
         st.pyplot(fig); plt.close(fig)
 
-    if summary_rows:
-        st.markdown("---")
-        st.markdown("### 📋 Linearization Summary")
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
+    if not summary_rows:
+        return
+
+    # ── Build pivot: best model per catalyst (highest linear R²) ──
+    df_sum = pd.DataFrame(summary_rows)
+
+    # For each catalyst find the model with max R²
+    best_linear = (
+        df_sum.loc[df_sum.groupby("Catalyst")["R²"].idxmax()]
+        .set_index("Catalyst")[["Model", "R²"]]
+        .rename(columns={"Model": "Best model (linear R²)",
+                         "R²":    "Best R²"})
+    )
+
+    # Pivot so each row = one catalyst, columns = models
+    df_pivot = df_sum.pivot_table(
+        index="Catalyst", columns="Model", values="R²"
+    ).reset_index()
+    df_pivot.columns.name = None
+
+    # Merge best-model column
+    df_pivot = df_pivot.merge(best_linear, on="Catalyst", how="left")
+
+    # Reorder: Catalyst | Best model | Best R² | individual model R²s
+    model_cols = [c for c in df_pivot.columns
+                  if c not in ("Catalyst", "Best model (linear R²)", "Best R²")]
+    df_pivot = df_pivot[["Catalyst", "Best model (linear R²)", "Best R²"] + model_cols]
+
+    st.markdown("---")
+    st.markdown("### 📋 Linearization Summary")
+    st.caption(
+        "**Best model (linear R²)** = model whose linearized form gives the highest R² "
+        "for that catalyst. Use this alongside the nonlinear AICc result in Tab 1 "
+        "to confirm model selection.")
+    st.dataframe(df_pivot, use_container_width=True)
+
 
 
 # ================================================================
