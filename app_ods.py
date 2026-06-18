@@ -4,48 +4,67 @@ ODS Calculation Suite — Streamlit Web App
 Extended build based on CatLab-Tools/app_ods.py (github.com/Hj1308/CatLab-Tools)
 Original author: Hoda Jafari
 
-v3.3 — Full scientific & code quality fix release
-----------------------------------------
-FIX 1 (v3.1): C₀ is now locked (fixed) in curve_fit for all models.
-FIX 2 (v3.1): Second-order t½ corrected to 1/(k₂·C₀).
-FIX 3 (v3.1): Extrapolation warning added when t½ < first data point.
-FIX 4 (v3.1): Best-model selection now uses AIC instead of R².
-FIX 5 (v3.1): r₀/m formula corrected — r₀ × V_fuel / m_cat.
-FIX 6 (v3.2): ppmS conversion now correctly uses fuel density ρ (g/mL).
-NEW 7 (v3.2): Dual concentration display C₀(compound) and C₀(S).
+v3.5.0 — Release build (full scientific & code quality fixes)
+-------------------------------------------------------------
+Earlier history (v3.1–v3.4.1):
+FIX 1 (v3.1): C0 is now locked (fixed) in curve_fit for all models.
+FIX 2 (v3.1): Second-order t1/2 corrected to 1/(k2*C0).
+FIX 3 (v3.1): Extrapolation warning added when t1/2 < first data point.
+FIX 4 (v3.1): Best-model selection moved away from raw R2.
+FIX 5 (v3.1): r0/m formula corrected — r0 * V_fuel / m_cat.
+NEW 7 (v3.2): Dual concentration display C0(compound) and C0(S).
 NEW 8 (v3.2): Solvent/fuel selector with preset densities.
-NEW 9 (v3.2): Oxidant efficiency tab warns when H₂O₂ not measured.
+NEW 9 (v3.2): Oxidant efficiency tab warns when H2O2 not measured.
 NEW 10 (v3.2): Model assumptions documented in expandable section.
-NEW 11 (v3.2): Version header unified.
-v3.3 fixes (all 13 issues from code review):
-FIX A: _lh_t_half now uses exact analytical solution from L-H ODE integration.
-FIX B: SUBSTRATES dict includes n_sulfur field; _C0_both uses it correctly.
-FIX C: Tab 5 uses Arrhenius equation for temperature sweep; O/S physically modelled.
-FIX D: Single file_uploader in session_state — upload once, use in all tabs.
-FIX E: warnings.filterwarnings scoped to scipy RuntimeWarning only.
-FIX F: Tab 6 H₂O₂ input keys stable (column-name based, with fallback).
-FIX G: Tab 1 best-model selection guarded against empty valid_models dict.
-FIX H: Tab 2 polyfit wrapped in try/except with user-friendly error message.
-FIX I: _load_kinetic_data helper centralises file reading and column detection.
-FIX J: matplotlib.use("Agg") moved before all imports.
-FIX K: Tab 5 exposes all 5 kinetic models for parameter sweep.
-FIX L: Download zip in Tab 1 now includes fitted curves, not just raw data.
-FIX M: UI clarification when ppmS is selected with custom substrate MW.
+FIX A (v3.3): _lh_t_half uses exact analytical solution from L-H ODE integration.
+FIX B (v3.3): SUBSTRATES dict includes n_sulfur field; _C0_both uses it correctly.
+FIX D (v3.3): Single file_uploader in session_state — upload once, use in all tabs.
+FIX E (v3.3): warnings.filterwarnings scoped to scipy/numpy RuntimeWarning only.
+FIX G (v3.3): Tab 1 best-model selection guarded against empty valid_models dict.
+FIX H (v3.3): Tab 2 polyfit wrapped in try/except with user-friendly error message.
+FIX I (v3.3): _load_kinetic_data helper centralises file reading and column detection.
+FIX J (v3.3): matplotlib.use("Agg") moved before all imports.
+FIX L (v3.3): Download zip in Tab 1 now includes fitted curves, not just raw data.
+NEW N (v3.4): Tab 8 — Arrhenius Multi-Temperature Analysis (extract Ea & A with 95% CI).
+NEW O (v3.4): Tab 9 — Residual Diagnostics (residuals, Q-Q, Shapiro-Wilk, runs test).
+NEW P (v3.4.1): create_advanced_template() — Excel template pre-filled with sidebar settings.
+v3.5.0 models: Power-Law, Eley-Rideal, Avrami, Double-Exponential added.
 
-v3.4 — New modules
-NEW N: Tab 8 — Arrhenius Multi-Temperature Analysis (upload per-T files, extract Ea & A with 95% CI)
-NEW O: Tab 9 — Residual Diagnostics (residuals vs time, vs fitted, Q-Q plot, Shapiro-Wilk, runs test)
-
-v3.4.1 — Template & UX improvements
-NEW P: create_advanced_template() — generates Excel template pre-filled with sidebar settings
-NEW Q: Tab 1 template expander upgraded — dual download buttons (simple + advanced template)
+v3.5.1 — Patch release
+FIX X: _power_law now clips `inside` to 1e-12 *before* the fractional
+       exponent and wraps in np.abs — prevents NaN/complex when curve_fit
+       explores large-k or long-t regions where the argument goes negative.
+FIX Y: Tab 8 (Arrhenius) PNG saved before st.pyplot/plt.close so the figure
+       object is still alive when written to the ZIP archive.
+FIX Z: Arrhenius interpretation guide warns that k from L-H and Power-Law
+       is a composite parameter; Ea is apparent and not directly comparable
+       with pseudo-first-order Ea values from the literature.
+FIX AA: Model Assumptions sidebar now classifies all models as mechanistic /
+        simplified-mechanistic / phenomenological, with an explicit caution
+        for Avrami and Double-Exponential in ODS context.
+FIX AB: Advanced template catalyst_name field now shows "My-Catalyst"
+        placeholder instead of incorrectly using substrate_name.
+FIX R: ppmS conversion is now VOLUMETRIC by default (mg(S)/L, no density), matching
+       standard lab preparation. A sidebar toggle exposes the mass basis (mg/kg) for
+       users whose sulfur content is a true mass fraction (density then applied).
+FIX S: Best-model selection now uses AICc (small-sample corrected AIC) instead of AIC,
+       and excludes only models whose parameter count is too large for the data
+       (n - p - 1 <= 0). All kinetic models, including zero-order, compete fairly.
+FIX T: "Second-order" renamed to "Pseudo-second-order" to match thesis terminology
+       (concentration-based, k2 in L/mol/min — identical integrated rate law).
+FIX U: Residual diagnostics sigma now uses the number of FREE parameters (N_PARAMS),
+       not len(params) which wrongly counted the fixed C0.
+FIX V: Version string unified to v3.5.0 across docstring, page config and header.
+FIX W: Removed unused scipy.integrate.quad import.
+NOTE:  Tab 5 parameter sweep intentionally supports only the three closed-form models
+       (zero / pseudo-first / pseudo-second order); higher models remain fit-only.
 
 Scientific references:
   - Barghi et al., ACS Omega 2025, 10, 15947. DOI: 10.1021/acsomega.4c06722
   - Dhir et al., J. Hazard. Mater. 2009, 161, 1360. DOI: 10.1016/j.jhazmat.2008.04.099
   - Sengupta et al., Ind. Eng. Chem. Res. 2012, 51, 147. DOI: 10.1021/ie2024068
   - EN 590:2022 — Automotive fuels, sulfur content specification (mg/kg)
-  - Safa et al., Fuel 2019, 239, 24–33. DOI: 10.1016/j.fuel.2018.10.147
+  - Safa et al., Fuel 2019, 239, 24-33. DOI: 10.1016/j.fuel.2018.10.147
 """
 
 # FIX J: matplotlib backend must be set before any other matplotlib import
@@ -57,7 +76,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from scipy.integrate import odeint, quad
+from scipy.integrate import odeint   # FIX W: removed unused 'quad'
 import io
 import zipfile
 import warnings
@@ -66,10 +85,10 @@ import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
-# ── Page config (must be first Streamlit call) ─────────────────
-st.set_page_config(page_title="ODS Calculation Suite v3.4.1", page_icon="🔬", layout="wide")
+# -- Page config (must be first Streamlit call) -----------------
+st.set_page_config(page_title="ODS Calculation Suite v3.5.1", page_icon="🔬", layout="wide")
 
-# ── Matplotlib style ────────────────────────────────────────────
+# -- Matplotlib style --------------------------------------------
 plt.rcParams.update({
     "font.family": "sans-serif",
     "font.sans-serif": ["DejaVu Sans"],
@@ -103,22 +122,26 @@ plt.rcParams.update({
     "savefig.bbox": "tight",
 })
 
-# ── Constants ────────────────────────────────────────────────────
+# -- Constants ----------------------------------------------------
 MW_S   = 32.06   # g/mol
 R_GAS  = 8.314   # J/(mol·K)
 COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
 MARKERS = ["o","s","^","D","v","P","*","X","h"]
 N_PARAMS = {
-    "Zero-order":         1,
-    "Pseudo-first":       1,
-    "Second-order":       1,
-    "Elovich":            2,
-    "L-H":                2,
-    "Power-Law":          2,
-    "Eley-Rideal":        2,
-    "Avrami":             2,
-    "Double-Exponential": 4,
+    "Zero-order":          1,
+    "Pseudo-first":        1,
+    "Pseudo-second-order": 1,
+    "Elovich":             2,
+    "L-H":                 2,
+    "Power-Law":           2,
+    "Eley-Rideal":         2,
+    "Avrami":              2,
+    "Double-Exponential":  4,
 }
+
+# FIX S: models excluded from automatic "best model" selection.
+# Empty by default — the nonlinear engine lets zero-order compete fairly via AICc.
+BEST_MODEL_EXCLUDE = set()
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
@@ -142,11 +165,21 @@ SOLVENTS = {
     "Custom (enter manually)": None,
 }
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # SHARED HELPERS
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 
-def _to_mol_L(value, unit, mw=None, rho_g_per_mL=None):
+def _to_mol_L(value, unit, mw=None, rho_g_per_mL=None, ppms_volumetric=True):
+    """
+    Convert a concentration to mol/L.
+
+    FIX R — ppmS handling:
+      * ppms_volumetric=True  (default): ppmS is treated as mg(S)/L, i.e. the
+        sulfur mass per LITRE of fuel (standard lab preparation). No density is
+        applied. 250 ppmS -> 250/32.06/1000 = 7.798e-3 mol/L.
+      * ppms_volumetric=False: ppmS is treated as a true mass fraction mg(S)/kg
+        fuel, so the fuel density (g/mL == kg/L) is required to obtain mg/L.
+    """
     unit = unit.strip()
     if unit == "mol/L":
         return value
@@ -161,28 +194,33 @@ def _to_mol_L(value, unit, mw=None, rho_g_per_mL=None):
             raise ValueError("MW required for g/L")
         return value / mw
     elif unit == "ppmS":
-        if rho_g_per_mL is None:
-            raise ValueError(
-                "Fuel density ρ (g/mL) is required for ppmS conversion. "
-                "Select a solvent or enter ρ manually in the sidebar."
-            )
-        c_mg_per_L = value * rho_g_per_mL
+        if ppms_volumetric:
+            # ppmS as mg(S)/L — volumetric lab prep, density NOT applied
+            c_mg_per_L = value
+        else:
+            # ppmS as true mass fraction mg(S)/kg fuel — density required
+            if rho_g_per_mL is None:
+                raise ValueError(
+                    "Fuel density rho (g/mL) is required for mass-based ppmS. "
+                    "Select a solvent / enter rho, or switch to volumetric ppmS."
+                )
+            c_mg_per_L = value * rho_g_per_mL
         return (c_mg_per_L / MW_S) / 1000.0
     else:
         raise ValueError(f"Unknown unit: {unit}")
 
 
-def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1):
+def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1, ppms_volumetric=True):
     if c0_unit == "ppmS":
-        C0_S        = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL)
+        C0_S        = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL, ppms_volumetric)
         C0_compound = C0_S / n_sulfur
     else:
-        C0_compound = _to_mol_L(c0_val, c0_unit, mw_poll, rho_g_per_mL)
+        C0_compound = _to_mol_L(c0_val, c0_unit, mw_poll, rho_g_per_mL, ppms_volumetric)
         C0_S        = C0_compound * n_sulfur
     return C0_compound, C0_S
 
 
-# ── Kinetic model functions ──────────────────────────────────────
+# -- Kinetic model functions -------------------------------------
 def _zero_order(t, k, C0):
     return np.maximum(C0 - k * t, 0)
 
@@ -207,18 +245,28 @@ def _lh_model(t, k_LH, K_ads, C0):
     t_full = np.concatenate(([0.0], t))
     sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
     return np.maximum(sol.flatten()[1:], 0.0)
-# ── Additional Non-Linear Kinetic Models (v3.5.0) ──────────────
 
+# -- Additional Non-Linear Kinetic Models (v3.5.0) --------------
 def _power_law(t, k, n, C0):
-    """Power-Law: -dC/dt = k·Cⁿ  (integrated form)"""
+    """
+    Power-Law: -dC/dt = k*C^n  (integrated form).
+    Stability fix (v3.5.1): inside is clipped to 1e-12 *before* taking the
+    fractional exponent, preventing NaN/complex when curve_fit explores large k
+    or long t where the argument would go negative.
+    """
     t = np.asarray(t, dtype=float)
     n = np.clip(n, 0.1, 5.0)
     if abs(n - 1.0) < 1e-5:
         return C0 * np.exp(-k * t)
     exponent = 1.0 - n
     inside = C0**exponent - k * exponent * t
+    # Clip before exponentiation — essential when curve_fit probes parameter
+    # regions where C would go negative (noisy data or large k estimates).
     inside = np.maximum(inside, 1e-12)
-    return inside ** (1.0 / exponent)
+    # Additional guard: exponent can be negative (n>1), making 1/exponent
+    # negative too. np.maximum already prevents complex output, but we
+    # explicitly use np.abs on the base to stay real-valued throughout.
+    return np.abs(inside) ** (1.0 / exponent)
 
 def _power_law_t_half(C0, k, n):
     try:
@@ -239,7 +287,7 @@ def _eley_rideal(t, k_er, K, C0):
     return np.maximum(sol.flatten()[1:], 0.0)
 
 def _avrami(t, k_av, n_av, C0):
-    """Avrami (Johnson-Mehl-Avrami): C(t) = C₀·exp(−k·tⁿ)"""
+    """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
     t = np.asarray(t, dtype=float)
     return C0 * np.exp(-k_av * t**n_av)
 
@@ -248,7 +296,7 @@ def _double_exponential(t, k1, k2, A, C0):
     t = np.asarray(t, dtype=float)
     return C0 * (A * np.exp(-k1 * t) + (1.0 - A) * np.exp(-k2 * t))
 
-# ── Statistical helpers ──────────────────────────────────────────
+# -- Statistical helpers -----------------------------------------
 def _r2(y_obs, y_pred):
     ss_res = np.sum((y_obs - y_pred) ** 2)
     ss_tot = np.sum((y_obs - np.mean(y_obs)) ** 2)
@@ -266,8 +314,24 @@ def _aic(y_obs, y_pred, p):
         return float("inf")
     return round(n * np.log(rss / n) + 2 * p, 4)
 
+def _aicc(y_obs, y_pred, p):
+    """
+    FIX S: small-sample corrected AIC. With few data points the plain AIC
+    penalty (2p) is too weak and over-parameterised models win spuriously.
+    AICc = AIC + 2p(p+1)/(n-p-1). Returns inf when n - p - 1 <= 0, which
+    flags the model as unsuitable for the available number of points.
+    """
+    n = len(y_obs)
+    aic = _aic(y_obs, y_pred, p)
+    if np.isinf(aic):
+        return float("inf")
+    denom = n - p - 1
+    if denom <= 0:
+        return float("inf")
+    return round(aic + (2.0 * p * (p + 1)) / denom, 4)
 
-# ── t½ helpers ────────────────────────────────────────────────────
+
+# -- t1/2 helpers -------------------------------------------------
 def _elovich_t_half(C0, alpha, beta):
     try:
         if alpha <= 0 or beta <= 0 or C0 <= 0:
@@ -284,8 +348,8 @@ def _elovich_t_half(C0, alpha, beta):
 
 def _lh_t_half(C0, k_LH, K_ads):
     """
-    FIX A: Exact analytical t½ for Langmuir-Hinshelwood.
-    t½ = ln(2)/(kLH·K) + C₀/(2·kLH)
+    FIX A: Exact analytical t1/2 for Langmuir-Hinshelwood.
+    t1/2 = ln(2)/(kLH*K) + C0/(2*kLH)
     """
     try:
         if k_LH <= 0 or K_ads <= 0 or C0 <= 0:
@@ -296,7 +360,7 @@ def _lh_t_half(C0, k_LH, K_ads):
         return float("nan")
 
 
-# ── Formatting helpers ────────────────────────────────────────────
+# -- Formatting helpers ------------------------------------------
 def _fmt_sci(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "N/A"
@@ -331,12 +395,11 @@ def _fmt_pm(val, se):
     return f"({val/scale:.2f} ± {se/scale:.2f}) × 10{str(exp).translate(sup)}"
 
 
-# ── FIX I: Centralised data loader ──────────────────────────────
+# -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
     try:
         if uploaded.name.endswith(".xlsx") or uploaded.name.endswith(".xls"):
             xl = pd.ExcelFile(uploaded)
-            # Try Raw_Data sheet first, then search all sheets for Time column
             target_sheet = None
             if "Raw_Data" in xl.sheet_names:
                 target_sheet = "Raw_Data"
@@ -355,13 +418,11 @@ def _load_kinetic_data(uploaded):
     except Exception as e:
         st.error(f"Cannot read file: {e}")
         return None, None, None
-    # Find time column
     time_col = [c for c in df.columns if "time" in str(c).lower()]
     if not time_col:
         st.error("No 'Time' column found.")
         return None, None, None
     time_col = time_col[0]
-    # Find removal columns — named "Removal" OR any numeric column that isn't Time
     removal_cols = [c for c in df.columns if "removal" in str(c).lower()]
     if not removal_cols:
         removal_cols = [c for c in df.columns
@@ -372,7 +433,7 @@ def _load_kinetic_data(uploaded):
     return df, time_col, removal_cols
 
 
-# ── Non-linear fitting engine ────────────────────────────────────
+# -- Non-linear fitting engine -----------------------------------
 def _fit_nonlinear(time, Ct, C0):
     t  = np.asarray(time, dtype=float)
     Ct = np.asarray(Ct,   dtype=float)
@@ -388,12 +449,13 @@ def _fit_nonlinear(time, Ct, C0):
         results["Zero-order"] = {
             "params": (k0, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
             "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
             "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)", "r0": k0, "r0_se": se[0],
         }
     except Exception as e:
-        results["Zero-order"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Zero-order"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
     # Pseudo-first-order
     try:
@@ -405,29 +467,31 @@ def _fit_nonlinear(time, Ct, C0):
         results["Pseudo-first"] = {
             "params": (kapp, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
             "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
             "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)", "r0": r0, "r0_se": se[0] * C0,
         }
     except Exception as e:
-        results["Pseudo-first"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Pseudo-first"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
-    # Second-order
+    # Pseudo-second-order  (FIX T: concentration-based, k2 in L/mol/min)
     try:
         p, pcov = curve_fit(lambda t_, k: _second_order(t_, k, C0), t, Ct,
                             p0=[1.0], bounds=([0], [np.inf]), maxfev=5000)
         se = np.sqrt(np.diag(pcov)); k2 = p[0]
-        pred = _second_order(t, k2, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Second-order"]
+        pred = _second_order(t, k2, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Pseudo-second-order"]
         r0 = k2 * C0 ** 2
-        results["Second-order"] = {
+        results["Pseudo-second-order"] = {
             "params": (k2, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
             "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
             "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)", "r0": r0, "r0_se": se[0] * C0 ** 2,
         }
     except Exception as e:
-        results["Second-order"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Pseudo-second-order"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
     # Elovich
     try:
@@ -438,12 +502,13 @@ def _fit_nonlinear(time, Ct, C0):
         results["Elovich"] = {
             "params": (alpha, beta, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
             "t_half": _elovich_t_half(C0, alpha, beta),
             "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)", "r0": alpha, "r0_se": se[0],
         }
     except Exception as e:
-        results["Elovich"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Elovich"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
     # Langmuir-Hinshelwood
     try:
@@ -457,17 +522,19 @@ def _fit_nonlinear(time, Ct, C0):
         results["L-H"] = {
             "params": (k_LH, K_ads, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
             "t_half": _lh_t_half(C0, k_LH, K_ads),
             "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)", "r0": r0, "r0_se": None,
             "K_ads": K_ads, "K_se": se[1], "regime": _regime,
         }
     except Exception as e:
-        results["L-H"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
-    # ── Power-Law (General Reaction Order) ──────────────────────
+        results["L-H"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+
+    # Power-Law (General Reaction Order)
     try:
         p, pcov = curve_fit(
-            lambda t_, k, n: _power_law(t_, k, n, C0),
+            lambda t_, k, n_: _power_law(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.5],
             bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000)
         se = np.sqrt(np.diag(pcov)); k_pl, n_pl = p
@@ -477,15 +544,16 @@ def _fit_nonlinear(time, Ct, C0):
         results["Power-Law"] = {
             "params": (k_pl, n_pl, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
             "t_half": _power_law_t_half(C0, k_pl, n_pl),
             "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
             "col_k": "k_PL", "r0": r0, "r0_se": None,
         }
     except Exception as e:
-        results["Power-Law"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Power-Law"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
-    # ── Eley-Rideal ───────────────────────────────────────────────
+    # Eley-Rideal
     try:
         p, pcov = curve_fit(
             lambda t_, k, K: _eley_rideal(t_, k, K, C0),
@@ -498,18 +566,19 @@ def _fit_nonlinear(time, Ct, C0):
         results["Eley-Rideal"] = {
             "params": (k_er, K_er, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
             "t_half": float("nan"),
             "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
             "col_k": "k_ER", "r0": r0, "r0_se": None,
         }
     except Exception as e:
-        results["Eley-Rideal"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Eley-Rideal"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
-    # ── Avrami ───────────────────────────────────────────────────
+    # Avrami
     try:
         p, pcov = curve_fit(
-            lambda t_, k, n: _avrami(t_, k, n, C0),
+            lambda t_, k, n_: _avrami(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.0],
             bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000)
         se = np.sqrt(np.diag(pcov)); k_av, n_av = p
@@ -518,15 +587,16 @@ def _fit_nonlinear(time, Ct, C0):
         results["Avrami"] = {
             "params": (k_av, n_av, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
             "t_half": float("nan"),
             "k": k_av, "k_se": se[0],
             "col_k": "k_Avrami", "r0": None, "r0_se": None,
         }
     except Exception as e:
-        results["Avrami"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Avrami"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
-    # ── Double Exponential ───────────────────────────────────────
+    # Double Exponential
     try:
         p, pcov = curve_fit(
             lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
@@ -538,13 +608,14 @@ def _fit_nonlinear(time, Ct, C0):
         results["Double-Exponential"] = {
             "params": (k1, k2, A_frac, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
             "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
             "t_half": float("nan"),
             "k": k1, "k_se": se[0],
             "col_k": "k1 (fast)", "r0": None, "r0_se": None,
         }
     except Exception as e:
-        results["Double-Exponential"] = {"R2": -999, "aic": float("inf"), "error": str(e)}
+        results["Double-Exponential"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
 
     return results
 
@@ -553,15 +624,24 @@ def _get_valid_models(res, model_names):
     return {m: res[m] for m in model_names if res[m].get("R2", -999) > -999}
 
 def _best_model(res, model_names):
+    """
+    FIX S: best model chosen by AICc (small-sample corrected). Excludes only
+    models in BEST_MODEL_EXCLUDE (empty by default) and any model whose AICc is
+    non-finite (too few points for its parameter count). The nonlinear fitting
+    engine lets zero-order compete on equal footing with the other models.
+    """
     valid = _get_valid_models(res, model_names)
-    if not valid:
+    candidates = {m: r for m, r in valid.items()
+                  if m not in BEST_MODEL_EXCLUDE
+                  and np.isfinite(r.get("aicc", float("inf")))}
+    if not candidates:
         return None
-    return min(valid, key=lambda m: valid[m].get("aic", float("inf")))
+    return min(candidates, key=lambda m: candidates[m].get("aicc", float("inf")))
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # SIDEBAR — universal settings
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _sidebar_settings():
     st.sidebar.title("⚙️ Settings")
     st.sidebar.subheader("Sulfur Compound")
@@ -577,12 +657,26 @@ def _sidebar_settings():
     c0_unit = st.sidebar.selectbox("Unit",
         ["ppmS","ppm","mg/L","mmol/L","mol/L","g/L"], index=0)
     c0_val  = st.sidebar.number_input("C₀ value", min_value=0.0, value=500.0, step=1.0)
+
+    # FIX R: ppmS basis toggle — volumetric (mg/L) by default
+    ppms_volumetric = True
     if c0_unit == "ppmS":
+        ppms_basis = st.sidebar.radio(
+            "ppmS definition",
+            ["Volumetric — mg(S)/L  (lab prep, density NOT used)",
+             "Mass — mg(S)/kg fuel  (requires density ρ)"],
+            index=0,
+            help="If you dissolved the sulfur compound into a fixed VOLUME of fuel, "
+                 "use Volumetric. Use Mass only if your sulfur content is a true mass "
+                 "fraction (mg/kg), in which case the fuel density is applied.")
+        ppms_volumetric = ppms_basis.startswith("Volumetric")
         st.sidebar.info(
-            f"ℹ️ **ppmS mode:** conversion uses MW(S) = 32.06 g/mol. "
-            f"n(S) per molecule = {n_sulfur}. C₀(compound) = C₀(S) / {n_sulfur}."
+            f"ℹ️ **ppmS mode:** MW(S)=32.06 g/mol · n(S)/molecule={n_sulfur} · "
+            f"C₀(compound)=C₀(S)/{n_sulfur}. "
+            + ("Density NOT applied (volumetric)."
+               if ppms_volumetric else "Density applied (mass basis).")
         )
-    st.sidebar.subheader("Fuel / Solvent (for ppmS)")
+    st.sidebar.subheader("Fuel / Solvent")
     solvent_name = st.sidebar.selectbox("Solvent", list(SOLVENTS.keys()), index=0)
     if SOLVENTS[solvent_name] is not None:
         rho = SOLVENTS[solvent_name]
@@ -590,9 +684,11 @@ def _sidebar_settings():
     else:
         rho = st.sidebar.number_input("ρ (g/mL)", min_value=0.500, max_value=2.000,
                                        value=0.684, step=0.001)
+    if c0_unit == "ppmS" and ppms_volumetric:
+        st.sidebar.caption("Note: density is informational only in volumetric ppmS mode.")
     C0_compound = C0_S = None
     try:
-        C0_compound, C0_S = _C0_both(c0_val, c0_unit, mw_poll, rho, n_sulfur)
+        C0_compound, C0_S = _C0_both(c0_val, c0_unit, mw_poll, rho, n_sulfur, ppms_volumetric)
         st.sidebar.markdown("---")
         st.sidebar.markdown("**Converted C₀**")
         col1, col2 = st.sidebar.columns(2)
@@ -613,37 +709,48 @@ def _sidebar_settings():
 - Negligible mass-transfer resistance
 - Single sulfur compound (or lumped removal %)
 
-**t½ (L-H) v3.3:** t½ = ln(2)/(kLH·K) + C₀/(2·kLH)
+**t½ (L-H):** t½ = ln(2)/(kLH·K) + C₀/(2·kLH)
+
+**Best model:** selected by AICc (small-sample corrected); over-parameterised
+models (too few points for their parameters) are excluded, but all kinetic
+models including zero-order compete on equal footing.
+
+**Model classes:**
+- *Mechanistic*: L-H, Eley-Rideal (surface-reaction based)
+- *Simplified mechanistic*: Zero-, Pseudo-first-, Pseudo-second-order, Power-Law
+- *Phenomenological / empirical*: Elovich (chemisorption heterogeneity),
+  Avrami (nucleation/growth — uncommon in ODS; use with caution),
+  Double-Exponential (two-site parallel decay — high overfitting risk with < 10 points)
         """)
     return {
         "substrate_name": substrate_name, "mw_poll": mw_poll, "n_sulfur": n_sulfur,
         "c0_unit": c0_unit, "c0_val": c0_val, "rho": rho,
+        "ppms_volumetric": ppms_volumetric,
         "C0": C0_compound, "C0_S": C0_S,
         "V_fuel": V_fuel / 1000.0, "m_cat": m_cat / 1000.0,
         "temp_C": temp_C, "O_S": O_S, "solvent_name": solvent_name,
     }
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # NEW P (v3.4.1): Advanced Template Generator
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.xlsx"):
     """Create advanced Excel template with Metadata sheet populated from sidebar settings."""
-
-    # Sheet 1: Metadata
     metadata = {
         "Parameter": [
             "sample_name", "catalyst_name", "substrate", "c0_value", "c0_unit",
-            "mw_pollutant", "n_sulfur", "fuel_solvent", "rho_g_per_mL",
+            "ppmS_basis", "mw_pollutant", "n_sulfur", "fuel_solvent", "rho_g_per_mL",
             "V_fuel_mL", "m_cat_mg", "temperature_C", "O_S_ratio",
             "active_sites_mmol_g", "notes"
         ],
         "Value": [
             "DBT-Test-01",
-            cfg.get("substrate_name", "MoS2"),
+            "My-Catalyst",           # catalyst_name — enter manually
             cfg.get("substrate_name", "DBT"),
             cfg.get("c0_val", 500),
             cfg.get("c0_unit", "ppmS"),
+            "volumetric" if cfg.get("ppms_volumetric", True) else "mass",
             cfg.get("mw_poll", 184.26),
             cfg.get("n_sulfur", 1),
             cfg.get("solvent_name", "n-Heptane"),
@@ -656,13 +763,12 @@ def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.
             "My experimental ODS data"
         ],
         "Unit/Description": [
-            "-", "-", "-", "-", "-", "g/mol", "-", "-", "g/mL",
+            "-", "-", "-", "-", "-", "-", "g/mol", "-", "-", "g/mL",
             "mL", "mg", "°C", "-", "mmol/g", "-"
         ]
     }
     df_meta = pd.DataFrame(metadata)
 
-    # Sheet 2: Raw_Data
     df_raw = pd.DataFrame({
         "Time (min)": [0, 15, 30, 45, 60, 90, 120, 180, 240],
         "Cat-A Removal (%)": [0, 18, 35, 52, 68, 82, 91, 96, 98],
@@ -670,13 +776,12 @@ def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.
         "Notes": [""] * 9
     })
 
-    # Sheet 3: Instructions
     instructions = pd.DataFrame({
         "Instructions": [
             "1. Review and edit the Metadata sheet if needed (settings from sidebar are pre-filled).",
             "2. Fill Time (min) and Removal (%) columns in the Raw_Data sheet with your experimental data.",
             "3. Save the file and upload it in the app.",
-            "4. The app will convert units, fit multiple kinetic models (including second-order), and select the best one using AIC."
+            "4. The app converts units, fits multiple kinetic models (incl. pseudo-second-order), and selects the best one using AICc."
         ]
     })
 
@@ -685,8 +790,6 @@ def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.
         df_meta.to_excel(writer, sheet_name="Metadata", index=False)
         df_raw.to_excel(writer, sheet_name="Raw_Data", index=False)
         instructions.to_excel(writer, sheet_name="Instructions", index=False)
-
-        # Auto-adjust column widths
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
             for col in worksheet.columns:
@@ -700,12 +803,11 @@ def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.
                         pass
                 adjusted_width = min(max_length + 2, 40)
                 worksheet.column_dimensions[column].width = adjusted_width
-
     buf.seek(0)
     return buf, filename
 
 
-# ── FIX D: Shared file uploader ──────────────────────────────────
+# -- FIX D: Shared file uploader ---------------------------------
 def _shared_uploader():
     st.markdown("### 📂 Data File")
     uploaded = st.file_uploader(
@@ -718,13 +820,34 @@ def _shared_uploader():
     return uploaded
 
 
-# ════════════════════════════════════════════════════════════════
+# Master list of models used across fitting tabs
+MODEL_NAMES = [
+    "Zero-order", "Pseudo-first", "Pseudo-second-order",
+    "Elovich", "L-H",
+    "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+]
+
+
+def _fit_curve(model, params, t_fine, C0):
+    """Return the fitted curve for a given model over t_fine."""
+    if model == "Zero-order":            return _zero_order(t_fine, params[0], C0)
+    elif model == "Pseudo-first":        return _first_order(t_fine, params[0], C0)
+    elif model == "Pseudo-second-order": return _second_order(t_fine, params[0], C0)
+    elif model == "Elovich":             return _elovich(t_fine, params[0], params[1], C0)
+    elif model == "L-H":                 return _lh_model(t_fine, params[0], params[1], C0)
+    elif model == "Power-Law":           return _power_law(t_fine, params[0], params[1], C0)
+    elif model == "Eley-Rideal":         return _eley_rideal(t_fine, params[0], params[1], C0)
+    elif model == "Avrami":              return _avrami(t_fine, params[0], params[1], C0)
+    elif model == "Double-Exponential":  return _double_exponential(t_fine, params[0], params[1], params[2], C0)
+    return _lh_model(t_fine, params[0], params[1], C0)
+
+
+# ================================================================
 # TAB 1 — Kinetic Fitting
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_kinetics(cfg, uploaded):
     st.header("📈 Tab 1 — Kinetic Fitting")
 
-    # NEW Q (v3.4.1): Upgraded dual-button template expander
     with st.expander("📋 Template & upload instructions", expanded=False):
         st.markdown("""
 **Required columns:**
@@ -735,10 +858,8 @@ def _tab_kinetics(cfg, uploaded):
 - Minimum 4-8 time points per catalyst
 - Include t=0 (Removal=0) if possible
         """)
-
         col1, col2 = st.columns(2)
         with col1:
-            # Simple template
             tmpl = pd.DataFrame({
                 "Time (min)": [0, 10, 20, 30, 60, 90, 120],
                 "Cat-A Removal (%)": [0, 15, 28, 40, 65, 80, 91],
@@ -749,7 +870,6 @@ def _tab_kinetics(cfg, uploaded):
             st.download_button("⬇️ Download simple template", buf.getvalue(),
                                "ods_simple_template.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
         with col2:
             if st.button("📋 Generate Advanced Template (with Metadata)", type="primary"):
                 buf, fname = create_advanced_template(cfg)
@@ -768,11 +888,7 @@ def _tab_kinetics(cfg, uploaded):
     t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    model_names = [
-        "Zero-order", "Pseudo-first", "Second-order",
-        "Elovich", "L-H",
-        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
-    ]
+    model_names = MODEL_NAMES
     all_results = {}
     for col in removal_cols:
         removal = df[col].dropna().values[:len(t)].astype(float)
@@ -788,23 +904,13 @@ def _tab_kinetics(cfg, uploaded):
         ax.plot(t, Ct_obs * 1000, marker, color=color, label=col + " (data)")
         best_model = _best_model(res, model_names)
         if best_model is None: continue
-        bres = res[best_model]; params = bres["params"]
-        if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
-        elif best_model == "Pseudo-first":        Ct_fit = _first_order(t_fine, params[0], C0)
-        elif best_model == "Second-order":        Ct_fit = _second_order(t_fine, params[0], C0)
-        elif best_model == "Elovich":             Ct_fit = _elovich(t_fine, params[0], params[1], C0)
-        elif best_model == "L-H":                 Ct_fit = _lh_model(t_fine, params[0], params[1], C0)
-        elif best_model == "Power-Law":           Ct_fit = _power_law(t_fine, params[0], params[1], C0)
-        elif best_model == "Eley-Rideal":         Ct_fit = _eley_rideal(t_fine, params[0], params[1], C0)
-        elif best_model == "Avrami":              Ct_fit = _avrami(t_fine, params[0], params[1], C0)
-        elif best_model == "Double-Exponential":  Ct_fit = _double_exponential(t_fine, params[0], params[1], params[2], C0)
-        else:                                     Ct_fit = _lh_model(t_fine, params[0], params[1], C0)
+        Ct_fit = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
         ax.plot(t_fine, Ct_fit * 1000, "-", color=color, label=f"{col} — {best_model}")
     ax.set_xlabel("Time (min)"); ax.set_ylabel("C (mmol/L)")
-    ax.set_title("Concentration vs Time — Best Fit Model (by AIC)")
+    ax.set_title("Concentration vs Time — Best Fit Model (by AICc)")
     ax.legend(fontsize=9); fig.tight_layout()
     st.pyplot(fig); plt.close(fig)
-    st.subheader("📊 Fitting Summary (Best Model by AIC)")
+    st.subheader("📊 Fitting Summary (Best Model by AICc)")
     rows = []
     for col, res in all_results.items():
         best = _best_model(res, model_names)
@@ -819,7 +925,8 @@ def _tab_kinetics(cfg, uploaded):
         rows.append({"Catalyst": col, "Best Model": best,
                      "k": _fmt_pm(br.get("k"), br.get("k_se")),
                      "R²": br.get("R2","N/A"), "Adj-R²": br.get("adj_r2","N/A"),
-                     "AIC": br.get("aic","N/A"), "t½ (min)": _fmt_thalf(t_half),
+                     "AICc": br.get("aicc","N/A"), "AIC": br.get("aic","N/A"),
+                     "t½ (min)": _fmt_thalf(t_half),
                      "r₀ (mol/L/min)": _fmt_sci(r0), "r₀/m (mol/g/min)": _fmt_sci(r0_m),
                      "L-H Regime": br.get("regime", "–") if best == "L-H" else "–",
                      "Note": warn_str})
@@ -834,11 +941,11 @@ def _tab_kinetics(cfg, uploaded):
                     subrows.append({"Model": m,
                                     "k (±SE)": _fmt_pm(mr.get("k"), mr.get("k_se")),
                                     "R²": mr.get("R2","N/A"), "Adj-R²": mr.get("adj_r2","N/A"),
-                                    "AIC": mr.get("aic","N/A"),
+                                    "AICc": mr.get("aicc","N/A"), "AIC": mr.get("aic","N/A"),
                                     "t½ (min)": _fmt_thalf(mr.get("t_half", float("nan")))})
                 else:
                     subrows.append({"Model": m, "k (±SE)": "fit failed",
-                                    "R²": "–", "Adj-R²": "–", "AIC": "–", "t½ (min)": "–"})
+                                    "R²": "–", "Adj-R²": "–", "AICc": "–", "AIC": "–", "t½ (min)": "–"})
             st.dataframe(pd.DataFrame(subrows), use_container_width=True)
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w") as zf:
@@ -852,20 +959,10 @@ def _tab_kinetics(cfg, uploaded):
             ax2.plot(t, Ct_obs * 1000, MARKERS[ci % len(MARKERS)], color=color, label=col + " (data)")
             best_model = _best_model(res, model_names)
             if best_model is None: continue
-            bres = res[best_model]; params = bres["params"]
-            if best_model == "Zero-order":            Ct_fit = _zero_order(t_fine, params[0], C0)
-            elif best_model == "Pseudo-first":        Ct_fit = _first_order(t_fine, params[0], C0)
-            elif best_model == "Second-order":        Ct_fit = _second_order(t_fine, params[0], C0)
-            elif best_model == "Elovich":             Ct_fit = _elovich(t_fine, params[0], params[1], C0)
-            elif best_model == "L-H":                 Ct_fit = _lh_model(t_fine, params[0], params[1], C0)
-            elif best_model == "Power-Law":           Ct_fit = _power_law(t_fine, params[0], params[1], C0)
-            elif best_model == "Eley-Rideal":         Ct_fit = _eley_rideal(t_fine, params[0], params[1], C0)
-            elif best_model == "Avrami":              Ct_fit = _avrami(t_fine, params[0], params[1], C0)
-            elif best_model == "Double-Exponential":  Ct_fit = _double_exponential(t_fine, params[0], params[1], params[2], C0)
-            else:                                     Ct_fit = _lh_model(t_fine, params[0], params[1], C0)
+            Ct_fit = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
             ax2.plot(t_fine, Ct_fit * 1000, "-", color=color, label=f"{col} — {best_model}")
         ax2.set_xlabel("Time (min)"); ax2.set_ylabel("C (mmol/L)")
-        ax2.set_title("Concentration vs Time — Best Fit Model"); ax2.legend(fontsize=9)
+        ax2.set_title("Concentration vs Time — Best Fit Model (by AICc)"); ax2.legend(fontsize=9)
         fig2.tight_layout()
         png_buf = io.BytesIO(); fig2.savefig(png_buf, dpi=300, bbox_inches="tight")
         zf.writestr("kinetics_plot.png", png_buf.getvalue()); plt.close(fig2)
@@ -873,9 +970,9 @@ def _tab_kinetics(cfg, uploaded):
                        "kinetics_results.zip", "application/zip")
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 2 — Linearization
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_linearization(cfg, uploaded):
     st.header("📉 Tab 2 — Linearization Plots")
     if uploaded is None: st.info("Upload a file above."); return
@@ -886,13 +983,13 @@ def _tab_linearization(cfg, uploaded):
     if C0 is None: st.error("C₀ conversion failed."); return
 
     lin_models = [
-        ("Zero-order  |  C vs t",       "Time (min)", "C (mol/L)",
+        ("Zero-order  |  C vs t",            "Time (min)", "C (mol/L)",
          lambda t_, Ct: (t_, Ct)),
-        ("Pseudo-first  |  ln C vs t",  "Time (min)", "ln C",
+        ("Pseudo-first  |  ln C vs t",       "Time (min)", "ln C",
          lambda t_, Ct: (t_[Ct > 0], np.log(Ct[Ct > 0]))),
-        ("Second-order  |  1/C vs t",   "Time (min)", "1/C (L/mol)",
+        ("Pseudo-second-order  |  1/C vs t", "Time (min)", "1/C (L/mol)",
          lambda t_, Ct: (t_[Ct > 0], 1.0 / Ct[Ct > 0])),
-        ("Elovich  |  C vs ln t",       "ln t",       "C (mol/L)",
+        ("Elovich  |  C vs ln t",            "ln t",       "C (mol/L)",
          lambda t_, Ct: (np.log(t_[t_ > 0]), Ct[t_ > 0])),
     ]
 
@@ -937,9 +1034,9 @@ def _tab_linearization(cfg, uploaded):
         st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 3 — Removal Efficiency
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_removal(cfg, uploaded):
     st.header("♻️ Tab 3 — Removal Efficiency")
     if uploaded is None: st.info("Upload a file above."); return
@@ -968,11 +1065,9 @@ def _tab_removal(cfg, uploaded):
     fig2.tight_layout(); st.pyplot(fig2); plt.close(fig2)
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 4 — TON / TOF
-# ════════════════════════════════════════════════════════════════
-
-# ρ_site presets (µmol/m²) per material family
+# ================================================================
 _SITE_DENSITY_PRESETS = {
     "Metal oxides (MoO₃, V₂O₅, WO₃, TiO₂)":         {"rho": 2.0,  "range": "1–5",   "method": "NH₃-TPD or H₂-TPR"},
     "Zeolites (ZSM-5, USY, Beta, SAPO)":               {"rho": 5.0,  "range": "2–10",  "method": "Pyridine-FTIR or NH₃-TPD"},
@@ -1006,7 +1101,6 @@ def _tab_ton_tof(cfg, uploaded):
          "Option 2 — Estimate from BET surface area + material type"],
         horizontal=True)
 
-    # ── Option 1: direct mmol/g ───────────────────────────────────
     if "Option 1" in method_choice:
         st.markdown("#### Direct input")
         col_a, col_b = st.columns(2)
@@ -1024,8 +1118,6 @@ def _tab_ton_tof(cfg, uploaded):
         n_sites_mol = site_density * 1e-3 * m
         st.info(f"n_active_sites = **{n_sites_mol*1e6:.3f} µmol** "
                 f"({site_density} mmol/g × {m} g catalyst) — method: {char_method}")
-
-    # ── Option 2: BET-based ───────────────────────────────────────
     else:
         st.markdown("#### BET-based estimation")
         col_a, col_b = st.columns(2)
@@ -1033,7 +1125,6 @@ def _tab_ton_tof(cfg, uploaded):
             s_bet = st.number_input("BET surface area (m²/g)",
                                     min_value=0.1, value=100.0, step=10.0)
             mat_type = st.selectbox("Material family", list(_SITE_DENSITY_PRESETS.keys()))
-
         preset = _SITE_DENSITY_PRESETS[mat_type]
         with col_b:
             if preset["rho"] is not None:
@@ -1046,13 +1137,10 @@ def _tab_ton_tof(cfg, uploaded):
             else:
                 rho_default = 1.0
                 st.markdown("Enter your own ρ_site value below.")
-
             rho_site = st.number_input(
                 "ρ_site — active site surface density (µmol/m²)",
                 min_value=0.01, value=rho_default, step=0.1,
                 help="Override the preset if you have measured this value.")
-
-        # n_sites = S_BET (m²/g) × m (g) × ρ_site (µmol/m²) → mol
         n_sites_mol = s_bet * m * rho_site * 1e-6
         site_density_equiv = (n_sites_mol * 1e3) / m if m > 0 else float("nan")
         st.info(
@@ -1076,18 +1164,16 @@ def _tab_ton_tof(cfg, uploaded):
 > **Note:** These are literature-based estimates. If you have measured site density directly (TPD, TPR, chemisorption), use **Option 1** for higher accuracy.
             """)
 
-    # ── Shared calculation ────────────────────────────────────────
     st.markdown("---")
     st.markdown("### 📋 TON & TOF Results")
     if n_sites_mol <= 0:
         st.error("n_active_sites = 0. Check your inputs."); return
-
     rows = []
     for col in removal_cols:
         removal = df[col].dropna().values[:len(t)].astype(float)
         X_final = removal[-1] / 100.0
-        n_conv  = C0 * V * X_final          # mol
-        t_rxn   = t[-1]                     # min
+        n_conv  = C0 * V * X_final
+        t_rxn   = t[-1]
         ton = n_conv / n_sites_mol
         tof = ton / t_rxn if t_rxn > 0 else float("nan")
         rows.append({
@@ -1100,8 +1186,6 @@ def _tab_ton_tof(cfg, uploaded):
             "TOF (h⁻¹)":      f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
-
-    # Bar chart TOF comparison
     if len(rows) > 1:
         fig, ax = plt.subplots(figsize=(7, 4))
         cats  = [r["Catalyst"] for r in rows]
@@ -1113,15 +1197,17 @@ def _tab_ton_tof(cfg, uploaded):
         fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 5 — Parameter Effect
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_parameter_effect(cfg, uploaded):
     st.header("🔬 Tab 5 — Parameter Effect")
+    st.caption("Simulation tab — uses the three closed-form models "
+               "(pseudo-first / zero / pseudo-second order).")
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
     model_choice = st.selectbox("Kinetic model for simulation",
-        ["Pseudo-first","Zero-order","Second-order"])
+        ["Pseudo-first","Zero-order","Pseudo-second-order"])
     param  = st.selectbox("Parameter to sweep", [
         "Initial concentration C₀","Catalyst mass m",
         "Temperature (Arrhenius)","O/S molar ratio"])
@@ -1169,9 +1255,9 @@ def _tab_parameter_effect(cfg, uploaded):
     ax.legend(fontsize=9); fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 6 — Oxidant Efficiency
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_oxidant_efficiency(cfg, uploaded):
     st.header("🧪 Tab 6 — Oxidant Efficiency")
     measure_h2o2 = st.radio("H₂O₂ consumption measurement available?", [
@@ -1209,9 +1295,9 @@ def _tab_oxidant_efficiency(cfg, uploaded):
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # TAB 7 — Condition Comparison
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def _tab_comparison(cfg):
     st.header("📊 Tab 7 — Condition Comparison")
     with st.expander("📋 Expected format", expanded=False):
@@ -1252,14 +1338,14 @@ def _tab_comparison(cfg):
         fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
 
-# ════════════════════════════════════════════════════════════════
-# TAB 8 — Arrhenius Multi-Temperature Analysis (NEW v3.4)
-# ════════════════════════════════════════════════════════════════
+# ================================================================
+# TAB 8 — Arrhenius Multi-Temperature Analysis
+# ================================================================
 def _tab_arrhenius(cfg):
     st.header("🌡️ Tab 8 — Arrhenius Analysis (Multi-Temperature)")
     st.markdown(r"""
 **Purpose:** Upload kinetic datasets at **different temperatures**, fit each with the best kinetic
-model (AIC), collect k(T), then fit the Arrhenius equation to extract **Eₐ** and **A**.
+model (AICc), collect k(T), then fit the Arrhenius equation to extract **Eₐ** and **A**.
 
 $$k(T) = A \cdot \exp\!\left(-\frac{E_a}{RT}\right)$$
 
@@ -1285,13 +1371,9 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                             min_value=-20.0, max_value=200.0, value=25.0, step=5.0,
                             key=f"arr_T_{uf.name}")
         temps_C.append(T)
-    model_names = [
-        "Zero-order", "Pseudo-first", "Second-order",
-        "Elovich", "L-H",
-        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
-    ]
+    model_names = MODEL_NAMES
     model_choice_arr = st.selectbox("Kinetic model for k extraction",
-        ["Best (AIC)","Pseudo-first","Second-order","L-H"], index=0, key="arr_model_choice")
+        ["Best (AICc)","Pseudo-first","Pseudo-second-order","L-H"], index=0, key="arr_model_choice")
     if st.button("▶ Run Arrhenius Fitting", key="run_arrhenius"):
         results_per_T = {}; catalyst_names_all = None
         progress = st.progress(0)
@@ -1306,7 +1388,7 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                 removal = df[col].dropna().values[:len(t)].astype(float)
                 Ct  = C0 * (1 - removal / 100.0)
                 res = _fit_nonlinear(t, Ct, C0)
-                chosen = _best_model(res, model_names) if model_choice_arr == "Best (AIC)" \
+                chosen = _best_model(res, model_names) if model_choice_arr == "Best (AICc)" \
                          else model_choice_arr
                 cat_k[col] = res[chosen]["k"] if (chosen and res[chosen].get("R2",-999) > -999) else None
             results_per_T[T_K] = cat_k
@@ -1358,14 +1440,19 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
             except Exception as e:
                 ax.set_title(f"{cat}\nFit failed: {e}")
                 arrh_rows.append({"Catalyst": cat, "Eₐ (kJ/mol)": f"Error: {e}", "n_T": len(k_vals)})
-        fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+        fig.tight_layout()
+        # FIX (v3.5.1): save PNG *before* st.pyplot/plt.close so the figure
+        # object is still alive when we write it into the ZIP archive.
+        png_buf = io.BytesIO()
+        fig.savefig(png_buf, dpi=300, bbox_inches="tight")
+        png_buf.seek(0)
+        st.pyplot(fig); plt.close(fig)
         st.subheader("Arrhenius Parameters")
         st.dataframe(pd.DataFrame(arrh_rows), use_container_width=True)
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w") as zf:
             csv_buf = io.StringIO(); pd.DataFrame(arrh_rows).to_csv(csv_buf, index=False)
             zf.writestr("arrhenius_parameters.csv", csv_buf.getvalue())
-            png_buf = io.BytesIO(); fig.savefig(png_buf, dpi=300, bbox_inches="tight")
             zf.writestr("arrhenius_plot.png", png_buf.getvalue())
         st.download_button("⬇️ Download Arrhenius results (.zip)", zip_buf.getvalue(),
                            "arrhenius_results.zip", "application/zip")
@@ -1377,6 +1464,14 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
 - **40–80 kJ/mol** → surface-reaction controlled (typical ODS)
 - **> 100 kJ/mol** → possible deactivation artefact
 
+**⚠️ Note on composite rate constants:**
+When k is extracted from **L-H** or **Power-Law** models, it is a *composite*
+parameter (e.g. k_LH × K_ads for L-H), not an elementary rate constant.
+The Eₐ obtained therefore represents an *apparent* activation energy that
+includes adsorption enthalpy contributions and cannot be compared directly
+with Eₐ values from pseudo-first-order fits reported in the literature.
+For cross-study comparisons, use **Pseudo-first-order** k values.
+
 **References:**
 - Barghi et al., *ACS Omega* **2025**, 10, 15947. DOI: 10.1021/acsomega.4c06722
 - Dhir et al., *J. Hazard. Mater.* **2009**, 161, 1360. DOI: 10.1016/j.jhazmat.2008.04.099
@@ -1384,15 +1479,17 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
             """)
 
 
-# ════════════════════════════════════════════════════════════════
-# TAB 9 — Residual Diagnostics (NEW v3.4)
-# ════════════════════════════════════════════════════════════════
+# ================================================================
+# TAB 9 — Residual Diagnostics
+# ================================================================
 def _tab_residuals(cfg, uploaded):
     st.header("🔍 Tab 9 — Residual Diagnostics")
     st.markdown("""
 **Purpose:** Check model quality via residual analysis.
 Plots: Residuals vs Time, Residuals vs Fitted, Normal Q-Q, Standardised Residuals.
 Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test for systematic misfit.
+
+_Note: with only 5–9 points these tests have low statistical power and are indicative only._
     """)
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
@@ -1400,11 +1497,7 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
     t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-    model_names = [
-        "Zero-order", "Pseudo-first", "Second-order",
-        "Elovich", "L-H",
-        "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
-    ]
+    model_names = MODEL_NAMES
     col1, col2 = st.columns(2)
     with col1: cat_choice   = st.selectbox("Select catalyst", removal_cols, key="resid_cat")
     with col2: model_choice = st.selectbox("Select model",    model_names,  key="resid_model")
@@ -1417,15 +1510,18 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
     Ct_pred   = res["pred"]
     residuals = Ct_obs - Ct_pred
     n         = len(residuals)
-    sigma     = np.std(residuals, ddof=len(res["params"]) if "params" in res else 1)
+    # FIX U: use number of FREE parameters (N_PARAMS), not len(params) which counts fixed C0
+    p_free   = N_PARAMS.get(model_choice, 1)
+    ddof_use = p_free if (n - p_free) > 0 else 0
+    sigma    = np.std(residuals, ddof=ddof_use)
     std_resid = residuals / sigma if sigma > 0 else residuals
     from scipy import stats as scipy_stats
     col_a, col_b, col_c, col_d = st.columns(4)
     col_a.metric("R²",        f"{res['R2']:.4f}")
     col_b.metric("Adj-R²",    f"{res.get('adj_r2',float('nan')):.4f}"
                                if not np.isnan(res.get('adj_r2',float('nan'))) else "N/A")
-    col_c.metric("AIC",       f"{res.get('aic',float('nan')):.2f}"
-                               if not np.isinf(res.get('aic',float('inf'))) else "∞")
+    col_c.metric("AICc",      f"{res.get('aicc',float('nan')):.2f}"
+                               if not np.isinf(res.get('aicc',float('inf'))) else "∞")
     col_d.metric("RMSE (mol/L)", f"{np.sqrt(np.mean(residuals**2)):.2e}")
     sw_stat = sw_p = float("nan")
     if n >= 3:
@@ -1490,7 +1586,7 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
         for m in model_names:
             mr = all_res_full[m]
             if mr.get("R2",-999) <= -999:
-                comp_rows.append({"Model": m, "R²": "fail", "AIC": "fail",
+                comp_rows.append({"Model": m, "R²": "fail", "AICc": "fail", "AIC": "fail",
                                   "RMSE (mmol/L)": "fail", "Shapiro-Wilk p": "fail"}); continue
             pred_m  = mr["pred"]; resid_m = Ct_obs - pred_m
             rmse_m  = np.sqrt(np.mean(resid_m**2))
@@ -1500,7 +1596,7 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
                 except Exception: pass
             signs_m = np.sign(resid_m); runs_m = 1 + np.sum(signs_m[:-1] != signs_m[1:])
             comp_rows.append({"Model": m, "R²": mr["R2"], "Adj-R²": mr.get("adj_r2",float("nan")),
-                              "AIC": mr.get("aic",float("nan")),
+                              "AICc": mr.get("aicc",float("nan")), "AIC": mr.get("aic",float("nan")),
                               "RMSE (mmol/L)": round(rmse_m * 1000, 5),
                               "Shapiro-Wilk p": round(sw_p_m,4) if not np.isnan(sw_p_m) else "N/A",
                               "Runs": runs_m})
@@ -1513,15 +1609,15 @@ Statistical tests: Shapiro-Wilk normality, outlier detection (|z|>2), runs test 
                        f"residuals_{cat_choice}_{model_choice}.csv", "text/csv")
 
 
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 # MAIN APP
-# ════════════════════════════════════════════════════════════════
+# ================================================================
 def main():
     st.markdown("""
 <div style='background:linear-gradient(90deg,#1a1a2e,#16213e);
             padding:18px 24px;border-radius:10px;margin-bottom:16px'>
   <h2 style='color:#e0e0e0;margin:0'>🔬 ODS Calculation Suite
-    <span style='font-size:0.6em;color:#aaa'> v3.4.1 — CatLab-Tools</span></h2>
+    <span style='font-size:0.6em;color:#aaa'> v3.5.1 — CatLab-Tools</span></h2>
   <p style='color:#aaa;margin:4px 0 0'>
     Oxidative Desulfurization Kinetics &amp; Analysis |
     Author: Hoda Jafari |
