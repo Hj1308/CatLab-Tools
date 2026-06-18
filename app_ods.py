@@ -1054,7 +1054,7 @@ def _tab_kinetics(cfg, uploaded):
 
         best = _best_model(all_results[col], model_names)
         if best is None: continue
-        Ct_line = _fit_curve(best, all_results[col]["params"], t_fine, C0)
+        Ct_line = _fit_curve(best, all_results[col][best]["params"], t_fine, C0)
         ax.plot(t_fine, Ct_line * 1000, "-", color=color,
                 label=f"{cat_label}: {best}")
 
