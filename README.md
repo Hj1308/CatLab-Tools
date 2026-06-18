@@ -1,5 +1,5 @@
 # CatLab-Tools 🔬
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753374.svg)](https://doi.org/10.5281/zenodo.20753374)
 ![Version](https://img.shields.io/badge/version-v3.0-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)

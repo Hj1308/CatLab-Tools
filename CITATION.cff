@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite"
+version: 3.5.1
+doi: 10.5281/zenodo.20753374
+date-released: 2026-06-18
+authors:
+  - family-names: Jafari
+    given-names: Hoda
+    orcid: ""
+repository-code: https://github.com/Hj1308/CatLab-Tools
+license: MIT
+keywords:
+  - oxidative desulfurization
+  - kinetics
+  - Langmuir-Hinshelwood
+  - catalysis
+  - streamlit
