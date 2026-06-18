@@ -30,6 +30,17 @@ NEW O (v3.4): Tab 9 — Residual Diagnostics (residuals, Q-Q, Shapiro-Wilk, runs
 NEW P (v3.4.1): create_advanced_template() — Excel template pre-filled with sidebar settings.
 v3.5.0 models: Power-Law, Eley-Rideal, Avrami, Double-Exponential added.
 
+v3.5.2 — Tab 1 data preparation controls
+NEW AC: Auto-inject t=0 (Removal=0%, C=C₀) when missing from uploaded data.
+        Checkbox in Tab 1 — on by default when t=0 absent. Anchors nonlinear
+        fit at known initial condition; dramatically improves pseudo-second-order
+        and L-H detection vs pseudo-first-order.
+NEW AD: Manual point exclusion multiselect in Tab 1. Excluded points are shown
+        as open markers on the plot but removed from fitting. Column "Note" in
+        summary table records which points were excluded.
+NEW AE: Auto-warning when excluding the last time point changes the best model
+        (saturation detection heuristic).
+
 v3.5.1 — Patch release
 FIX X: _power_law now clips `inside` to 1e-12 *before* the fractional
        exponent and wraps in np.abs — prevents NaN/complex when curve_fit
@@ -86,7 +97,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
 # -- Page config (must be first Streamlit call) -----------------
-st.set_page_config(page_title="ODS Calculation Suite v3.5.1", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="ODS Calculation Suite v3.5.2", page_icon="🔬", layout="wide")
 
 # -- Matplotlib style --------------------------------------------
 plt.rcParams.update({
@@ -885,31 +896,151 @@ def _tab_kinetics(cfg, uploaded):
         st.info("Upload a file above to begin fitting."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
-    t  = df[time_col].dropna().values.astype(float)
+    t_raw = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
+
+    # ── Data preparation controls ────────────────────────────────
+    st.markdown("---")
+    st.subheader("⚙️ Data Preparation")
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        # NEW: auto-inject t=0 if missing
+        has_t0 = 0.0 in t_raw or np.any(t_raw == 0)
+        add_t0 = st.checkbox(
+            "Auto-add t=0 point (Removal=0%, C=C₀)",
+            value=(not has_t0),
+            help="Recommended when t=0 is missing from your data. "
+                 "Anchors the fit at the known initial concentration C₀ — "
+                 "improves pseudo-second-order and L-H detection.")
+        if add_t0 and not has_t0:
+            st.info("✅ t=0 will be added automatically to all catalysts before fitting.")
+        elif add_t0 and has_t0:
+            st.info("ℹ️ t=0 already present in data — no duplication.")
+
+    with col_b:
+        # NEW: manual point exclusion
+        t_labels = [f"t = {int(ti)} min" for ti in t_raw]
+        excluded_labels = st.multiselect(
+            "Exclude time points from fitting (saturation / outliers)",
+            options=t_labels,
+            default=[],
+            help="Select points to exclude from kinetic fitting. "
+                 "Useful for saturation points at the end or outliers. "
+                 "Excluded points are still shown on the plot as open markers.")
+        excluded_times = set()
+        for lbl in excluded_labels:
+            try:
+                excluded_times.add(float(lbl.replace("t = ","").replace(" min","")))
+            except Exception:
+                pass
+
+    # Build keep mask for raw points
+    keep_mask = np.array([ti not in excluded_times for ti in t_raw])
+    t_keep = t_raw[keep_mask]
+
+    # Inject t=0 if needed
+    if add_t0 and not has_t0:
+        t_fit = np.concatenate(([0.0], t_keep))
+    else:
+        t_fit = t_keep
+
+    if len(t_fit) < 3:
+        st.error("⚠️ Too few points for fitting after exclusion (minimum 3). "
+                 "Please unselect some excluded points."); return
+
+    if excluded_times:
+        st.warning(f"⚠️ Excluded from fitting: {', '.join(excluded_labels)}  "
+                   f"({len(excluded_times)} point(s)). "
+                   f"Fitting uses {len(t_fit)} point(s).")
+
+    st.markdown("---")
+
     model_names = MODEL_NAMES
     all_results = {}
+
     for col in removal_cols:
-        removal = df[col].dropna().values[:len(t)].astype(float)
-        Ct = C0 * (1 - removal / 100.0)
-        all_results[col] = _fit_nonlinear(t, Ct, C0)
-    t_fine = np.linspace(0, t.max(), 300)
+        removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
+        removal_keep = removal_raw[keep_mask]
+        Ct_keep = C0 * (1 - removal_keep / 100.0)
+
+        # Inject C0 at t=0 if needed
+        if add_t0 and not has_t0:
+            Ct_fit = np.concatenate(([C0], Ct_keep))
+        else:
+            Ct_fit = Ct_keep
+
+        all_results[col] = _fit_nonlinear(t_fit, Ct_fit, C0)
+
+    # ── Auto-warning: does excluding last point change best model? ──
+    for col in removal_cols:
+        if len(t_fit) >= 4 and not excluded_times:
+            removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
+            t_no_last = t_fit[:-1]
+            Ct_no_last = C0 * (1 - removal_raw[:len(t_no_last)] / 100.0)
+            if add_t0 and not has_t0:
+                t_no_last2 = np.concatenate(([0.0], t_no_last))
+                Ct_no_last2 = np.concatenate(([C0], Ct_no_last))
+            else:
+                t_no_last2 = t_no_last
+                Ct_no_last2 = Ct_no_last
+            try:
+                res_no_last = _fit_nonlinear(t_no_last2, Ct_no_last2, C0)
+                best_full = _best_model(all_results[col], model_names)
+                best_no_last = _best_model(res_no_last, model_names)
+                if best_full != best_no_last:
+                    st.warning(
+                        f"⚠️ **{col}**: Best model changes from **{best_full}** → "
+                        f"**{best_no_last}** when the last point "
+                        f"(t={int(t_fit[-1])} min) is excluded. "
+                        f"This may indicate saturation at t={int(t_fit[-1])} min. "
+                        f"Consider excluding it manually above.")
+            except Exception:
+                pass
+
+    t_fine = np.linspace(0, t_raw.max(), 300)
     fig, ax = plt.subplots(figsize=(8, 5))
     for ci, (col, res) in enumerate(all_results.items()):
-        removal  = df[col].dropna().values[:len(t)].astype(float)
-        Ct_obs   = C0 * (1 - removal / 100.0)
-        color    = COLORS[ci % len(COLORS)]
-        marker   = MARKERS[ci % len(MARKERS)]
-        ax.plot(t, Ct_obs * 1000, marker, color=color, label=col + " (data)")
+        removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
+        color  = COLORS[ci % len(COLORS)]
+        marker = MARKERS[ci % len(MARKERS)]
+
+        # Plot all raw points — excluded ones as open markers
+        for ti, ri, in_fit in zip(t_raw, removal_raw, keep_mask):
+            Ct_i = C0 * (1 - ri / 100.0)
+            if in_fit:
+                ax.plot(ti, Ct_i * 1000, marker, color=color,
+                        markersize=7, zorder=5)
+            else:
+                ax.plot(ti, Ct_i * 1000, marker, color=color,
+                        markersize=9, markerfacecolor="white",
+                        markeredgewidth=1.5, zorder=5,
+                        label=f"t={int(ti)} excluded" if ci == 0 else "")
+
+        # t=0 injected point
+        if add_t0 and not has_t0:
+            ax.plot(0, C0 * 1000, marker, color=color,
+                    markersize=7, markerfacecolor="none",
+                    markeredgewidth=1.5, linestyle="", zorder=4)
+
+        ax.plot([], [], marker, color=color, label=col + " (data)")
+
         best_model = _best_model(res, model_names)
         if best_model is None: continue
-        Ct_fit = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
-        ax.plot(t_fine, Ct_fit * 1000, "-", color=color, label=f"{col} — {best_model}")
+        Ct_fit_line = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
+        ax.plot(t_fine, Ct_fit_line * 1000, "-", color=color,
+                label=f"{col} — {best_model}")
+
     ax.set_xlabel("Time (min)"); ax.set_ylabel("C (mmol/L)")
-    ax.set_title("Concentration vs Time — Best Fit Model (by AICc)")
+    title_note = ""
+    if add_t0 and not has_t0: title_note += " [t=0 added]"
+    if excluded_times: title_note += f" [{len(excluded_times)} pt excluded]"
+    ax.set_title(f"Concentration vs Time — Best Fit Model (AICc){title_note}")
     ax.legend(fontsize=9); fig.tight_layout()
     st.pyplot(fig); plt.close(fig)
+
     st.subheader("📊 Fitting Summary (Best Model by AICc)")
     rows = []
     for col, res in all_results.items():
@@ -921,7 +1052,13 @@ def _tab_kinetics(cfg, uploaded):
         V    = cfg["V_fuel"]; m = cfg["m_cat"]
         r0_m = r0 * V / m if (r0 and m > 0) else float("nan")
         t_half = br.get("t_half", float("nan"))
-        warn_str = "⚠️ t½ before first data point" if not np.isnan(t_half) and t_half < t[0] else ""
+        notes = []
+        if not np.isnan(t_half) and t_half < t_fit[t_fit > 0][0]:
+            notes.append("⚠️ t½ before first data point")
+        if excluded_times:
+            notes.append(f"excl: {', '.join([str(int(x)) for x in sorted(excluded_times)])} min")
+        if add_t0 and not has_t0:
+            notes.append("t=0 added")
         rows.append({"Catalyst": col, "Best Model": best,
                      "k": _fmt_pm(br.get("k"), br.get("k_se")),
                      "R²": br.get("R2","N/A"), "Adj-R²": br.get("adj_r2","N/A"),
@@ -929,8 +1066,9 @@ def _tab_kinetics(cfg, uploaded):
                      "t½ (min)": _fmt_thalf(t_half),
                      "r₀ (mol/L/min)": _fmt_sci(r0), "r₀/m (mol/g/min)": _fmt_sci(r0_m),
                      "L-H Regime": br.get("regime", "–") if best == "L-H" else "–",
-                     "Note": warn_str})
+                     "Note": " | ".join(notes)})
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
     with st.expander("🔍 All models for each catalyst", expanded=False):
         for col, res in all_results.items():
             st.markdown(f"**{col}**")
@@ -945,25 +1083,29 @@ def _tab_kinetics(cfg, uploaded):
                                     "t½ (min)": _fmt_thalf(mr.get("t_half", float("nan")))})
                 else:
                     subrows.append({"Model": m, "k (±SE)": "fit failed",
-                                    "R²": "–", "Adj-R²": "–", "AICc": "–", "AIC": "–", "t½ (min)": "–"})
+                                    "R²": "–", "Adj-R²": "–", "AICc": "–", "AIC": "–",
+                                    "t½ (min)": "–"})
             st.dataframe(pd.DataFrame(subrows), use_container_width=True)
+
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w") as zf:
         csv_buf = io.StringIO(); pd.DataFrame(rows).to_csv(csv_buf, index=False)
         zf.writestr("fitting_summary.csv", csv_buf.getvalue())
         fig2, ax2 = plt.subplots(figsize=(8, 5))
         for ci, (col, res) in enumerate(all_results.items()):
-            removal  = df[col].dropna().values[:len(t)].astype(float)
-            Ct_obs   = C0 * (1 - removal / 100.0)
-            color    = COLORS[ci % len(COLORS)]
-            ax2.plot(t, Ct_obs * 1000, MARKERS[ci % len(MARKERS)], color=color, label=col + " (data)")
+            removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
+            color = COLORS[ci % len(COLORS)]
+            Ct_obs_all = C0 * (1 - removal_raw / 100.0)
+            ax2.plot(t_raw, Ct_obs_all * 1000, MARKERS[ci % len(MARKERS)],
+                     color=color, label=col + " (data)")
             best_model = _best_model(res, model_names)
             if best_model is None: continue
-            Ct_fit = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
-            ax2.plot(t_fine, Ct_fit * 1000, "-", color=color, label=f"{col} — {best_model}")
+            Ct_fit_line = _fit_curve(best_model, res[best_model]["params"], t_fine, C0)
+            ax2.plot(t_fine, Ct_fit_line * 1000, "-", color=color,
+                     label=f"{col} — {best_model}")
         ax2.set_xlabel("Time (min)"); ax2.set_ylabel("C (mmol/L)")
-        ax2.set_title("Concentration vs Time — Best Fit Model (by AICc)"); ax2.legend(fontsize=9)
-        fig2.tight_layout()
+        ax2.set_title(f"Concentration vs Time — Best Fit Model (AICc){title_note}")
+        ax2.legend(fontsize=9); fig2.tight_layout()
         png_buf = io.BytesIO(); fig2.savefig(png_buf, dpi=300, bbox_inches="tight")
         zf.writestr("kinetics_plot.png", png_buf.getvalue()); plt.close(fig2)
     st.download_button("⬇️ Download results (.zip)", zip_buf.getvalue(),
@@ -1617,7 +1759,7 @@ def main():
 <div style='background:linear-gradient(90deg,#1a1a2e,#16213e);
             padding:18px 24px;border-radius:10px;margin-bottom:16px'>
   <h2 style='color:#e0e0e0;margin:0'>🔬 ODS Calculation Suite
-    <span style='font-size:0.6em;color:#aaa'> v3.5.1 — CatLab-Tools</span></h2>
+    <span style='font-size:0.6em;color:#aaa'> v3.5.2 — CatLab-Tools</span></h2>
   <p style='color:#aaa;margin:4px 0 0'>
     Oxidative Desulfurization Kinetics &amp; Analysis |
     Author: Hoda Jafari |
