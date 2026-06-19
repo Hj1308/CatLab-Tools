@@ -151,8 +151,9 @@ N_PARAMS = {
 }
 
 # FIX S: models excluded from automatic "best model" selection.
-# Empty by default — the nonlinear engine lets zero-order compete fairly via AICc.
-BEST_MODEL_EXCLUDE = set()
+# Double-Exponential (4 params) is excluded — near-certain overfitting with <10 points.
+# Zero-order competes fairly via AICc + parsimony rule in _best_model.
+BEST_MODEL_EXCLUDE = {"Double-Exponential"}
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
@@ -636,10 +637,15 @@ def _get_valid_models(res, model_names):
 
 def _best_model(res, model_names):
     """
-    FIX S: best model chosen by AICc (small-sample corrected). Excludes only
-    models in BEST_MODEL_EXCLUDE (empty by default) and any model whose AICc is
-    non-finite (too few points for its parameter count). The nonlinear fitting
-    engine lets zero-order compete on equal footing with the other models.
+    Best model selection for ODS kinetics with small datasets (~5 points).
+
+    Rules (in order):
+    1. Exclude models in BEST_MODEL_EXCLUDE or with non-finite AICc.
+    2. Among remaining candidates, find the minimum AICc (best_aicc).
+    3. Parsimony: if a simpler model (fewer parameters) has AICc within
+       DELTA_AICC_PARSIMONY of best_aicc, prefer the simpler one.
+       This prevents over-parameterised models (Elovich, L-H) from winning
+       spuriously when the improvement over a 1-parameter model is negligible.
     """
     valid = _get_valid_models(res, model_names)
     candidates = {m: r for m, r in valid.items()
@@ -647,7 +653,18 @@ def _best_model(res, model_names):
                   and np.isfinite(r.get("aicc", float("inf")))}
     if not candidates:
         return None
-    return min(candidates, key=lambda m: candidates[m].get("aicc", float("inf")))
+
+    # Step 1: find model with lowest AICc
+    best_aicc_model = min(candidates, key=lambda m: candidates[m]["aicc"])
+    best_aicc_val   = candidates[best_aicc_model]["aicc"]
+
+    # Step 2: parsimony — collect all models within DELTA_AICC_PARSIMONY
+    DELTA_AICC_PARSIMONY = 2.0
+    competitive = {m: r for m, r in candidates.items()
+                   if r["aicc"] - best_aicc_val <= DELTA_AICC_PARSIMONY}
+
+    # Step 3: among competitive models, return the one with fewest parameters
+    return min(competitive, key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
 
 
 # ================================================================
@@ -1026,6 +1043,29 @@ def _tab_kinetics(cfg, uploaded):
     u_label = c0_unit
     C0_user = _C_to_user(C0)
 
+    # ── Raw Data Table ────────────────────────────────────────────
+    with st.expander("📋 Raw data table", expanded=False):
+        initial_data = []
+        for col in removal_cols:
+            removal_raw2 = df[col].dropna().values[:len(t_raw)].astype(float)
+            cat_label2   = col.replace(" Removal (%)","").strip()
+            for ti, rem in zip(t_raw, removal_raw2):
+                C_t = C0 * (1 - rem / 100.0)
+                row = {
+                    "Catalyst":    cat_label2,
+                    "Time (min)":  int(ti),
+                    "Removal (%)": round(rem, 2),
+                    "C (mmol/L)":  round(C_t * 1000, 4),
+                }
+                if c0_unit == "ppmS":
+                    row[f"C ({u_label})"] = round(_C_to_user(C_t), 2)
+                initial_data.append(row)
+        df_initial = pd.DataFrame(initial_data)
+        st.dataframe(df_initial, use_container_width=True, hide_index=True)
+        csv_raw = df_initial.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download raw data table (CSV)",
+                           csv_raw, "ods_raw_data.csv", "text/csv")
+
     t_fine     = np.linspace(0, t_raw.max(), 300)
     title_note = " [t=0 added]" if (add_t0 and not has_t0) else ""
 
@@ -1298,12 +1338,18 @@ def _tab_linearization(cfg, uploaded):
     df_pivot = df_pivot[["Catalyst", "Best model (linear R²)", "Best R²"] + model_cols]
 
     st.markdown("---")
-    st.markdown("### 📋 Linearization Summary")
-    st.caption(
-        "**Best model (linear R²)** = model whose linearized form gives the highest R² "
-        "for that catalyst. Use this alongside the nonlinear AICc result in Tab 1 "
-        "to confirm model selection.")
-    st.dataframe(df_pivot, use_container_width=True)
+    st.markdown("### 🏆 Best Model by Linear R²")
+    st.dataframe(best_linear.reset_index(), use_container_width=True, hide_index=True)
+
+    st.markdown("### 📋 All Models — R² Comparison")
+    st.dataframe(df_pivot, use_container_width=True, hide_index=True)
+
+    st.info(
+        "**How to interpret:** Use **Tab 1 (AICc + parsimony)** as the primary "
+        "model selection. Use **Tab 2 (linear R²)** as supporting visual evidence. "
+        "With only 5–6 points, **Pseudo-second-order** and **L-H** are generally "
+        "more physically meaningful than Elovich or Power-Law."
+    )
 
 
 
