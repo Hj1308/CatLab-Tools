@@ -1003,7 +1003,7 @@ def _tab_kinetics(cfg, uploaded):
     Ct_fit_per_cat = {}
 
     # Auto-saturation thresholds
-    SAT_THRESH_1 = 8.0   # if last interval < 8% → remove last point
+    SAT_THRESH_1 = 12.0  # if last interval < 12% → remove last point
     SAT_THRESH_2 = 10.0  # if penultimate interval also < 10% → remove that too
 
     for col in removal_cols:
@@ -1325,7 +1325,7 @@ def _tab_linearization(cfg, uploaded):
     if C0 is None: st.error("C₀ conversion failed."); return
 
     # ── Same auto-saturation as Tab 1 ────────────────────────────
-    SAT_THRESH_1 = 8.0
+    SAT_THRESH_1 = 12.0
     SAT_THRESH_2 = 10.0
 
     def _apply_autosat(t_raw, removal_raw):
@@ -1431,9 +1431,22 @@ def _tab_linearization(cfg, uploaded):
 
     st.markdown("---")
     st.markdown("### 🏆 Best Model by Linear R²")
-    st.caption("Saturation points excluded before linearization — same as Tab 1.")
-    st.dataframe(best_linear[["Best model (linear R²)","Best R²"]].reset_index(),
-                 use_container_width=True, hide_index=True)
+    st.caption(
+        "⚠️ With < 4 points after saturation exclusion, linear R² is unreliable. "
+        "**Use Tab 1 (AICc) as the authoritative model selection.**")
+    # Flag catalysts with few points
+    pts_per_cat = {}
+    for col in removal_cols:
+        rem_all = df[col].dropna().values[:len(t_raw)].astype(float)
+        t_u, _, _ = _apply_autosat(t_raw, rem_all)
+        pts_per_cat[col.replace(" Removal (%)","").strip()] = len(t_u)
+
+    best_df = best_linear[["Best model (linear R²)","Best R²"]].reset_index()
+    best_df.columns = ["Catalyst","Best model (linear R²)","Best R²"]
+    best_df["Points used"] = best_df["Catalyst"].map(pts_per_cat)
+    best_df["Note"] = best_df["Points used"].apply(
+        lambda n: "⚠️ < 4 pts — see Tab 1" if n < 4 else "")
+    st.dataframe(best_df, use_container_width=True, hide_index=True)
 
     st.markdown("### 📋 All Models — R² Comparison")
     st.dataframe(df_pivot, use_container_width=True, hide_index=True)
