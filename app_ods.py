@@ -939,6 +939,11 @@ def _tab_kinetics(cfg, uploaded):
         st.info("ℹ️ t=0 already present — no duplication.")
 
     # Per-catalyst point exclusion
+    # Apply reset BEFORE multiselects are rendered
+    if st.session_state.pop("reset_excl", False):
+        for col in removal_cols:
+            st.session_state[f"excl_{col}"] = []
+
     st.markdown("**Point exclusion per catalyst** — select outlier / saturation points:")
     t_labels  = [f"t = {int(ti)} min" for ti in t_raw]
     n_cols_ui = min(len(removal_cols), 3)
@@ -962,7 +967,7 @@ def _tab_kinetics(cfg, uploaded):
 
     st.markdown("---")
 
-    # Force rerun button — ensures exclusion changes are applied
+    # Run / Reset buttons
     run_col, reset_col, _ = st.columns([1, 1, 2])
     with run_col:
         run_analysis = st.button("▶ Run / Update Analysis", type="primary",
@@ -970,10 +975,7 @@ def _tab_kinetics(cfg, uploaded):
     with reset_col:
         if st.button("🔄 Reset exclusions",
                      help="Clear all excluded points for all catalysts."):
-            for col in removal_cols:
-                key = f"excl_{col}"
-                if key in st.session_state:
-                    st.session_state[key] = []
+            st.session_state["reset_excl"] = True
             if "tab1_ran" in st.session_state:
                 del st.session_state["tab1_ran"]
             st.rerun()
