@@ -1320,9 +1320,22 @@ def _tab_linearization(cfg, uploaded):
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
-    t  = df[time_col].dropna().values.astype(float)
+    t_raw = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
+
+    # ── Same auto-saturation as Tab 1 ────────────────────────────
+    SAT_THRESH_1 = 8.0
+    SAT_THRESH_2 = 15.0
+
+    def _apply_autosat(t_raw, removal_raw):
+        """Apply auto-saturation exclusion — same logic as Tab 1."""
+        t_use = t_raw.copy(); rem_use = removal_raw.copy(); excl = []
+        if len(rem_use) >= 3 and (rem_use[-1] - rem_use[-2]) < SAT_THRESH_1:
+            excl.append(int(t_use[-1])); t_use = t_use[:-1]; rem_use = rem_use[:-1]
+        if len(rem_use) >= 3 and (rem_use[-1] - rem_use[-2]) < SAT_THRESH_2:
+            excl.append(int(t_use[-1])); t_use = t_use[:-1]; rem_use = rem_use[:-1]
+        return t_use, rem_use, excl
 
     # Four classical linearized forms
     lin_models = [
@@ -1347,13 +1360,29 @@ def _tab_linearization(cfg, uploaded):
         st.markdown(f"### {model_title}")
         fig, ax = plt.subplots(figsize=(8, 4))
         for ci, col in enumerate(removal_cols):
-            removal   = df[col].dropna().values[:len(t)].astype(float)
-            Ct        = C0 * (1 - removal / 100.0)
-            color     = COLORS[ci % len(COLORS)]
-            marker    = MARKERS[ci % len(MARKERS)]
-            cat_label = col.replace(" Removal (%)","").strip()
+            removal_all = df[col].dropna().values[:len(t_raw)].astype(float)
+            cat_label   = col.replace(" Removal (%)","").strip()
+            color  = COLORS[ci % len(COLORS)]
+            marker = MARKERS[ci % len(MARKERS)]
+
+            # Apply auto-saturation
+            t_use, rem_use, excl = _apply_autosat(t_raw, removal_all)
+            Ct = C0 * (1 - rem_use / 100.0)
+
+            # Show excluded points as open markers
+            for ti, ri in zip(t_raw, removal_all):
+                Ct_i = C0 * (1 - ri / 100.0)
+                if ti in excl:
+                    try:
+                        _, y_excl = transform(np.array([ti]), np.array([Ct_i]))
+                        ax.scatter(_, y_excl, color=color, marker=marker,
+                                   s=80, zorder=4, facecolors="none",
+                                   edgecolors=color, linewidths=1.5)
+                    except Exception:
+                        pass
+
             try:
-                x_vals, y_vals = transform(t, Ct)
+                x_vals, y_vals = transform(t_use, Ct)
                 if len(x_vals) < 2:
                     continue
                 ax.scatter(x_vals, y_vals, color=color, marker=marker,
@@ -1363,9 +1392,11 @@ def _tab_linearization(cfg, uploaded):
                 ax.plot(x_fit, np.polyval(coeffs, x_fit), "--",
                         color=color, lw=1.5, alpha=0.8)
                 r2_lin = _r2(y_vals, np.polyval(coeffs, x_vals))
+                excl_note = f" [excl t={excl}]" if excl else ""
                 summary_rows.append({
                     "Model":     model_title.split("|")[0].strip(),
-                    "Catalyst":  cat_label,
+                    "Catalyst":  cat_label + excl_note,
+                    "Catalyst_key": cat_label,
                     "slope":     round(coeffs[0], 6),
                     "intercept": round(coeffs[1], 6),
                     "R²":        round(r2_lin, 4),
@@ -1373,7 +1404,8 @@ def _tab_linearization(cfg, uploaded):
             except Exception:
                 continue
         ax.set_xlabel(x_lbl); ax.set_ylabel(y_lbl)
-        ax.set_title(model_title, fontweight="bold")
+        ax.set_title(model_title + "  (saturation points excluded)",
+                     fontweight="bold")
         ax.legend(fontsize=9)
         fig.tight_layout()
         st.pyplot(fig); plt.close(fig)
@@ -1381,42 +1413,38 @@ def _tab_linearization(cfg, uploaded):
     if not summary_rows:
         return
 
-    # ── Build pivot: best model per catalyst (highest linear R²) ──
+    # ── Build pivot using Catalyst_key (without excl note) ───────
     df_sum = pd.DataFrame(summary_rows)
 
-    # Exclude same models as Tab 1 from "best" selection
-    df_sum_eligible = df_sum[~df_sum["Model"].isin(
-        {m.split("  |")[0].strip() for m in [
-            "Elovich", "Double-Exponential"]}
-    )]
-    if df_sum_eligible.empty:
-        df_sum_eligible = df_sum  # fallback if all excluded
+    # Exclude Elovich/Double-Exp from best selection
+    df_eligible = df_sum[~df_sum["Model"].isin({"Elovich", "Double-Exponential"})]
+    if df_eligible.empty:
+        df_eligible = df_sum
 
-    # For each catalyst find the model with max R² (from eligible models only)
     best_linear = (
-        df_sum_eligible.loc[df_sum_eligible.groupby("Catalyst")["R²"].idxmax()]
-        .set_index("Catalyst")[["Model", "R²"]]
-        .rename(columns={"Model": "Best model (linear R²)",
-                         "R²":    "Best R²"})
+        df_eligible.loc[df_eligible.groupby("Catalyst_key")["R²"].idxmax()]
+        .set_index("Catalyst_key")[["Model", "Catalyst", "R²"]]
+        .rename(columns={"Model":    "Best model (linear R²)",
+                         "Catalyst": "Catalyst (note)",
+                         "R²":       "Best R²"})
     )
 
-    # Pivot so each row = one catalyst, columns = models
     df_pivot = df_sum.pivot_table(
-        index="Catalyst", columns="Model", values="R²"
-    ).reset_index()
+        index="Catalyst_key", columns="Model", values="R²"
+    ).reset_index().rename(columns={"Catalyst_key": "Catalyst"})
     df_pivot.columns.name = None
-
-    # Merge best-model column
-    df_pivot = df_pivot.merge(best_linear, on="Catalyst", how="left")
-
-    # Reorder: Catalyst | Best model | Best R² | individual model R²s
+    df_pivot = df_pivot.merge(
+        best_linear[["Best model (linear R²)","Best R²"]],
+        left_on="Catalyst", right_index=True, how="left")
     model_cols = [c for c in df_pivot.columns
-                  if c not in ("Catalyst", "Best model (linear R²)", "Best R²")]
-    df_pivot = df_pivot[["Catalyst", "Best model (linear R²)", "Best R²"] + model_cols]
+                  if c not in ("Catalyst","Best model (linear R²)","Best R²")]
+    df_pivot = df_pivot[["Catalyst","Best model (linear R²)","Best R²"] + model_cols]
 
     st.markdown("---")
     st.markdown("### 🏆 Best Model by Linear R²")
-    st.dataframe(best_linear.reset_index(), use_container_width=True, hide_index=True)
+    st.caption("Saturation points excluded before linearization — same as Tab 1.")
+    st.dataframe(best_linear[["Best model (linear R²)","Best R²"]].reset_index(),
+                 use_container_width=True, hide_index=True)
 
     st.markdown("### 📋 All Models — R² Comparison")
     st.dataframe(df_pivot, use_container_width=True, hide_index=True)
@@ -1424,8 +1452,7 @@ def _tab_linearization(cfg, uploaded):
     st.info(
         "**How to interpret:** Use **Tab 1 (AICc + parsimony)** as the primary "
         "model selection. Use **Tab 2 (linear R²)** as supporting visual evidence. "
-        "With only 5–6 points, **Pseudo-second-order** and **L-H** are generally "
-        "more physically meaningful than Elovich or Power-Law."
+        "Open markers = excluded saturation points (not used in linearization)."
     )
 
 
