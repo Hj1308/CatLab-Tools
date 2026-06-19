@@ -1368,18 +1368,8 @@ def _tab_linearization(cfg, uploaded):
             # Apply auto-saturation
             t_use, rem_use, excl = _apply_autosat(t_raw, removal_all)
             Ct = C0 * (1 - rem_use / 100.0)
-
-            # Show excluded points as open markers
-            for ti, ri in zip(t_raw, removal_all):
-                Ct_i = C0 * (1 - ri / 100.0)
-                if ti in excl:
-                    try:
-                        _, y_excl = transform(np.array([ti]), np.array([Ct_i]))
-                        ax.scatter(_, y_excl, color=color, marker=marker,
-                                   s=80, zorder=4, facecolors="none",
-                                   edgecolors=color, linewidths=1.5)
-                    except Exception:
-                        pass
+            # Excluded points are NOT shown — their 1/C values are very large
+            # (near-plateau C → huge 1/C) and distort the axis completely.
 
             try:
                 x_vals, y_vals = transform(t_use, Ct)
@@ -1404,8 +1394,7 @@ def _tab_linearization(cfg, uploaded):
             except Exception:
                 continue
         ax.set_xlabel(x_lbl); ax.set_ylabel(y_lbl)
-        ax.set_title(model_title + "  (saturation points excluded)",
-                     fontweight="bold")
+        ax.set_title(model_title, fontweight="bold")
         ax.legend(fontsize=9)
         fig.tight_layout()
         st.pyplot(fig); plt.close(fig)
@@ -1452,7 +1441,8 @@ def _tab_linearization(cfg, uploaded):
     st.info(
         "**How to interpret:** Use **Tab 1 (AICc + parsimony)** as the primary "
         "model selection. Use **Tab 2 (linear R²)** as supporting visual evidence. "
-        "Open markers = excluded saturation points (not used in linearization)."
+        "Saturation points are excluded from both fitting and plotting — "
+        "only the linear kinetic region is shown."
     )
 
 
