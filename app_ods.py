@@ -662,7 +662,7 @@ def _best_model(res, model_names):
     best_aicc_val = min(r["aicc"] for r in candidates.values())
 
     # Step 2: competitive window
-    DELTA = 2.5
+    DELTA = 4.0
     competitive = {m: r for m, r in candidates.items()
                    if r["aicc"] - best_aicc_val <= DELTA}
 
@@ -1004,7 +1004,7 @@ def _tab_kinetics(cfg, uploaded):
 
     # Auto-saturation thresholds
     SAT_THRESH_1 = 8.0   # if last interval < 8% → remove last point
-    SAT_THRESH_2 = 15.0  # if penultimate interval also < 15% → remove that too
+    SAT_THRESH_2 = 10.0  # if penultimate interval also < 10% → remove that too
 
     for col in removal_cols:
         removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
@@ -1326,7 +1326,7 @@ def _tab_linearization(cfg, uploaded):
 
     # ── Same auto-saturation as Tab 1 ────────────────────────────
     SAT_THRESH_1 = 8.0
-    SAT_THRESH_2 = 15.0
+    SAT_THRESH_2 = 10.0
 
     def _apply_autosat(t_raw, removal_raw):
         """Apply auto-saturation exclusion — same logic as Tab 1."""
