@@ -1317,9 +1317,17 @@ def _tab_linearization(cfg, uploaded):
     # ── Build pivot: best model per catalyst (highest linear R²) ──
     df_sum = pd.DataFrame(summary_rows)
 
-    # For each catalyst find the model with max R²
+    # Exclude same models as Tab 1 from "best" selection
+    df_sum_eligible = df_sum[~df_sum["Model"].isin(
+        {m.split("  |")[0].strip() for m in [
+            "Elovich", "Double-Exponential"]}
+    )]
+    if df_sum_eligible.empty:
+        df_sum_eligible = df_sum  # fallback if all excluded
+
+    # For each catalyst find the model with max R² (from eligible models only)
     best_linear = (
-        df_sum.loc[df_sum.groupby("Catalyst")["R²"].idxmax()]
+        df_sum_eligible.loc[df_sum_eligible.groupby("Catalyst")["R²"].idxmax()]
         .set_index("Catalyst")[["Model", "R²"]]
         .rename(columns={"Model": "Best model (linear R²)",
                          "R²":    "Best R²"})
