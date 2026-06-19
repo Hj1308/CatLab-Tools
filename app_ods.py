@@ -962,6 +962,28 @@ def _tab_kinetics(cfg, uploaded):
 
     st.markdown("---")
 
+    # Force rerun button — ensures exclusion changes are applied
+    run_col, reset_col, _ = st.columns([1, 1, 2])
+    with run_col:
+        run_analysis = st.button("▶ Run / Update Analysis", type="primary",
+                                  help="Click after changing point exclusion or t=0 settings.")
+    with reset_col:
+        if st.button("🔄 Reset exclusions",
+                     help="Clear all excluded points for all catalysts."):
+            for col in removal_cols:
+                key = f"excl_{col}"
+                if key in st.session_state:
+                    st.session_state[key] = []
+            if "tab1_ran" in st.session_state:
+                del st.session_state["tab1_ran"]
+            st.rerun()
+
+    if run_analysis:
+        st.session_state["tab1_ran"] = True
+    if not st.session_state.get("tab1_ran", False):
+        st.info("Press **▶ Run / Update Analysis** to start fitting.")
+        return
+
     # ── Fitting ───────────────────────────────────────────────────
     model_names    = MODEL_NAMES
     all_results    = {}
@@ -982,9 +1004,9 @@ def _tab_kinetics(cfg, uploaded):
             t_fit  = t_keep
             Ct_fit = Ct_keep
 
-        if len(t_fit) < 3:
-            st.error(f"⚠️ {col.replace(' Removal (%)','')}: too few points after "
-                     f"exclusion (min 3). Unselect some points."); continue
+        if len(t_fit) < 2:
+            st.error(f"⚠️ **{col.replace(' Removal (%)','').strip()}**: only {len(t_fit)} point(s) remain after exclusion — minimum 2 needed. Please unselect some points above.")
+            continue
 
         t_fit_per_cat[col]  = t_fit
         Ct_fit_per_cat[col] = Ct_fit
