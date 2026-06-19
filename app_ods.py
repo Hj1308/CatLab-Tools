@@ -151,9 +151,11 @@ N_PARAMS = {
 }
 
 # FIX S: models excluded from automatic "best model" selection.
-# Double-Exponential (4 params) is excluded — near-certain overfitting with <10 points.
-# Zero-order competes fairly via AICc + parsimony rule in _best_model.
-BEST_MODEL_EXCLUDE = {"Double-Exponential"}
+# Double-Exponential (4 params): near-certain overfitting with <10 points.
+# Elovich: chemisorption model — not mechanistically appropriate for ODS
+#          oxidation reactions; its 2-parameter flexibility causes spurious
+#          wins over pseudo-second-order on fast-saturation data.
+BEST_MODEL_EXCLUDE = {"Double-Exponential", "Elovich"}
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
