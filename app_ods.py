@@ -643,11 +643,13 @@ def _best_model(res, model_names):
 
     Rules (in order):
     1. Exclude models in BEST_MODEL_EXCLUDE or with non-finite AICc.
-    2. Among remaining candidates, find the minimum AICc (best_aicc).
-    3. Parsimony: if a simpler model (fewer parameters) has AICc within
-       DELTA_AICC_PARSIMONY of best_aicc, prefer the simpler one.
-       This prevents over-parameterised models (Elovich, L-H) from winning
-       spuriously when the improvement over a 1-parameter model is negligible.
+    2. Find model with lowest AICc (best_aicc).
+    3. Parsimony window (DELTA=2.5): collect all models within 2.5 AICc units
+       of best_aicc — these are statistically indistinguishable.
+    4. Within the competitive set:
+       a. If Pseudo-second-order is present AND its R² >= (best R² - 0.01),
+          return it — physically most meaningful for ODS heterogeneous catalysis.
+       b. Otherwise return the model with fewest parameters (then lowest AICc).
     """
     valid = _get_valid_models(res, model_names)
     candidates = {m: r for m, r in valid.items()
@@ -656,17 +658,24 @@ def _best_model(res, model_names):
     if not candidates:
         return None
 
-    # Step 1: find model with lowest AICc
-    best_aicc_model = min(candidates, key=lambda m: candidates[m]["aicc"])
-    best_aicc_val   = candidates[best_aicc_model]["aicc"]
+    # Step 1: find lowest AICc
+    best_aicc_val = min(r["aicc"] for r in candidates.values())
 
-    # Step 2: parsimony — collect all models within DELTA_AICC_PARSIMONY
-    DELTA_AICC_PARSIMONY = 2.0
+    # Step 2: competitive window
+    DELTA = 2.5
     competitive = {m: r for m, r in candidates.items()
-                   if r["aicc"] - best_aicc_val <= DELTA_AICC_PARSIMONY}
+                   if r["aicc"] - best_aicc_val <= DELTA}
 
-    # Step 3: among competitive models, return the one with fewest parameters
-    return min(competitive, key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
+    # Step 3: prefer Pseudo-second-order if competitive and R² close to best
+    if "Pseudo-second-order" in competitive:
+        pso_r2      = competitive["Pseudo-second-order"].get("R2", 0)
+        best_r2     = max(r.get("R2", 0) for r in competitive.values())
+        if pso_r2 >= best_r2 - 0.01:
+            return "Pseudo-second-order"
+
+    # Step 4: parsimony — fewest parameters, then lowest AICc
+    return min(competitive,
+               key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
 
 
 # ================================================================
