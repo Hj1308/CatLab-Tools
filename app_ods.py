@@ -940,7 +940,8 @@ def _tab_kinetics(cfg, uploaded):
 
     # Per-catalyst point exclusion
     # Apply reset BEFORE multiselects are rendered
-    if st.session_state.pop("reset_excl", False):
+    if st.session_state.get("reset_excl", False):
+        st.session_state["reset_excl"] = False
         for col in removal_cols:
             st.session_state[f"excl_{col}"] = []
 
@@ -1012,6 +1013,12 @@ def _tab_kinetics(cfg, uploaded):
 
         t_fit_per_cat[col]  = t_fit
         Ct_fit_per_cat[col] = Ct_fit
+        # Show diagnostic before fitting
+        n_excl = len(excl_times)
+        n_pts  = len(t_fit)
+        if n_excl > 0:
+            st.caption(f"  {col.replace(' Removal (%)','').strip()}: "
+                       f"{n_pts} points used ({n_excl} excluded)")
         all_results[col]    = _fit_nonlinear(t_fit, Ct_fit, C0)
 
     if not all_results:
