@@ -1002,12 +1002,39 @@ def _tab_kinetics(cfg, uploaded):
     t_fit_per_cat  = {}
     Ct_fit_per_cat = {}
 
+    # Auto-saturation thresholds
+    SAT_THRESH_1 = 8.0   # if last interval < 8% → remove last point
+    SAT_THRESH_2 = 15.0  # if penultimate interval also < 15% → remove that too
+
     for col in removal_cols:
         removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
         excl_times  = excl_per_cat[col]
         keep_mask   = np.array([ti not in excl_times for ti in t_raw])
         t_keep      = t_raw[keep_mask]
-        Ct_keep     = C0 * (1 - removal_raw[keep_mask] / 100.0)
+        rem_keep    = removal_raw[keep_mask]
+
+        # ── Auto-saturation detection (only when no manual exclusion) ──
+        auto_excl = []
+        if not excl_times and len(rem_keep) >= 3:
+            # Layer 1: last interval
+            if (rem_keep[-1] - rem_keep[-2]) < SAT_THRESH_1:
+                auto_excl.append(int(t_keep[-1]))
+                t_keep  = t_keep[:-1]
+                rem_keep = rem_keep[:-1]
+            # Layer 2: penultimate interval
+            if len(rem_keep) >= 3 and (rem_keep[-1] - rem_keep[-2]) < SAT_THRESH_2:
+                auto_excl.append(int(t_keep[-1]))
+                t_keep  = t_keep[:-1]
+                rem_keep = rem_keep[:-1]
+
+        if auto_excl:
+            cat_label = col.replace(" Removal (%)","").strip()
+            st.info(
+                f"ℹ️ **{cat_label}**: auto-excluded saturation point(s) "
+                f"t = {auto_excl} min (removal increment < {SAT_THRESH_1}%/"
+                f"{SAT_THRESH_2}%). Use manual exclusion above to override.")
+
+        Ct_keep = C0 * (1 - rem_keep / 100.0)
 
         if add_t0 and not has_t0:
             t_fit  = np.concatenate(([0.0], t_keep))
