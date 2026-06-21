@@ -155,7 +155,7 @@ N_PARAMS = {
 # Elovich: chemisorption model — not mechanistically appropriate for ODS
 #          oxidation reactions; its 2-parameter flexibility causes spurious
 #          wins over pseudo-second-order on fast-saturation data.
-BEST_MODEL_EXCLUDE = {"Double-Exponential", "Elovich"}
+BEST_MODEL_EXCLUDE = {"Double-Exponential", "Elovich", "Eley-Rideal"}
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
@@ -264,9 +264,8 @@ def _lh_model(t, k_LH, K_ads, C0):
 def _power_law(t, k, n, C0):
     """
     Power-Law: -dC/dt = k*C^n  (integrated form).
-    Stability fix (v3.5.1): inside is clipped to 1e-12 *before* taking the
-    fractional exponent, preventing NaN/complex when curve_fit explores large k
-    or long t where the argument would go negative.
+    v3.5.4: Correct branch for n>1 (exponent<0) — set C=0 when inside<=0
+    instead of raising to a negative power which gives +inf not 0.
     """
     t = np.asarray(t, dtype=float)
     n = np.clip(n, 0.1, 5.0)
@@ -274,19 +273,27 @@ def _power_law(t, k, n, C0):
         return C0 * np.exp(-k * t)
     exponent = 1.0 - n
     inside = C0**exponent - k * exponent * t
-    # Clip before exponentiation — essential when curve_fit probes parameter
-    # regions where C would go negative (noisy data or large k estimates).
-    inside = np.maximum(inside, 1e-12)
-    # Additional guard: exponent can be negative (n>1), making 1/exponent
-    # negative too. np.maximum already prevents complex output, but we
-    # explicitly use np.abs on the base to stay real-valued throughout.
-    return np.abs(inside) ** (1.0 / exponent)
+    if exponent > 0:   # n < 1: inside decreases toward 0, clip at 0
+        inside = np.maximum(inside, 0.0)
+        return inside ** (1.0 / exponent)
+    else:              # n > 1: reaction goes to completion when inside <= 0
+        C = np.zeros_like(inside)
+        mask = inside > 0
+        C[mask] = inside[mask] ** (1.0 / exponent)
+        return C
 
 def _power_law_t_half(C0, k, n):
+    """t½ for Power-Law. Returns NaN if not physically meaningful."""
     try:
         if abs(n - 1.0) < 1e-5:
             return round(np.log(2) / k, 4)
-        return round(C0**(1-n) * (2**(n-1) - 1) / (k * (n - 1)), 4)
+        # Analytical: t½ = [C0^(1-n) * (1 - 0.5^(1-n))] / [k*(1-n)]
+        # equivalent to original formula; valid for all n != 1
+        exponent = 1.0 - n
+        t_half = C0**exponent * (1.0 - 0.5**exponent) / (k * exponent)
+        if t_half > 0:
+            return round(t_half, 4)
+        return float("nan")
     except Exception:
         return float("nan")
 
@@ -428,7 +435,7 @@ def _load_kinetic_data(uploaded):
                 return None, None, None
             df = pd.read_excel(uploaded, sheet_name=target_sheet)
         else:
-            df = pd.read_csv(uploaded)
+            df = pd.read_csv(uploaded, sep=None, engine='python')
     except Exception as e:
         st.error(f"Cannot read file: {e}")
         return None, None, None
@@ -662,7 +669,7 @@ def _best_model(res, model_names):
     best_aicc_val = min(r["aicc"] for r in candidates.values())
 
     # Step 2: competitive window
-    DELTA = 4.0
+    DELTA = 2.5
     competitive = {m: r for m, r in candidates.items()
                    if r["aicc"] - best_aicc_val <= DELTA}
 
@@ -1003,8 +1010,8 @@ def _tab_kinetics(cfg, uploaded):
     Ct_fit_per_cat = {}
 
     # Auto-saturation thresholds
-    SAT_THRESH_1 = 12.0  # if last interval < 12% → remove last point
-    SAT_THRESH_2 = 10.0  # if penultimate interval also < 10% → remove that too
+    SAT_THRESH_1 = 8.0   # if last interval < 8% → remove last point
+    SAT_THRESH_2 = 15.0  # if penultimate interval also < 15% → remove that too
 
     for col in removal_cols:
         removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
@@ -1320,22 +1327,9 @@ def _tab_linearization(cfg, uploaded):
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
-    t_raw = df[time_col].dropna().values.astype(float)
+    t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
     if C0 is None: st.error("C₀ conversion failed."); return
-
-    # ── Same auto-saturation as Tab 1 ────────────────────────────
-    SAT_THRESH_1 = 12.0
-    SAT_THRESH_2 = 10.0
-
-    def _apply_autosat(t_raw, removal_raw):
-        """Apply auto-saturation exclusion — same logic as Tab 1."""
-        t_use = t_raw.copy(); rem_use = removal_raw.copy(); excl = []
-        if len(rem_use) >= 3 and (rem_use[-1] - rem_use[-2]) < SAT_THRESH_1:
-            excl.append(int(t_use[-1])); t_use = t_use[:-1]; rem_use = rem_use[:-1]
-        if len(rem_use) >= 3 and (rem_use[-1] - rem_use[-2]) < SAT_THRESH_2:
-            excl.append(int(t_use[-1])); t_use = t_use[:-1]; rem_use = rem_use[:-1]
-        return t_use, rem_use, excl
 
     # Four classical linearized forms
     lin_models = [
@@ -1360,19 +1354,13 @@ def _tab_linearization(cfg, uploaded):
         st.markdown(f"### {model_title}")
         fig, ax = plt.subplots(figsize=(8, 4))
         for ci, col in enumerate(removal_cols):
-            removal_all = df[col].dropna().values[:len(t_raw)].astype(float)
-            cat_label   = col.replace(" Removal (%)","").strip()
-            color  = COLORS[ci % len(COLORS)]
-            marker = MARKERS[ci % len(MARKERS)]
-
-            # Apply auto-saturation
-            t_use, rem_use, excl = _apply_autosat(t_raw, removal_all)
-            Ct = C0 * (1 - rem_use / 100.0)
-            # Excluded points are NOT shown — their 1/C values are very large
-            # (near-plateau C → huge 1/C) and distort the axis completely.
-
+            removal   = df[col].dropna().values[:len(t)].astype(float)
+            Ct        = C0 * (1 - removal / 100.0)
+            color     = COLORS[ci % len(COLORS)]
+            marker    = MARKERS[ci % len(MARKERS)]
+            cat_label = col.replace(" Removal (%)","").strip()
             try:
-                x_vals, y_vals = transform(t_use, Ct)
+                x_vals, y_vals = transform(t, Ct)
                 if len(x_vals) < 2:
                     continue
                 ax.scatter(x_vals, y_vals, color=color, marker=marker,
@@ -1382,11 +1370,9 @@ def _tab_linearization(cfg, uploaded):
                 ax.plot(x_fit, np.polyval(coeffs, x_fit), "--",
                         color=color, lw=1.5, alpha=0.8)
                 r2_lin = _r2(y_vals, np.polyval(coeffs, x_vals))
-                excl_note = f" [excl t={excl}]" if excl else ""
                 summary_rows.append({
                     "Model":     model_title.split("|")[0].strip(),
-                    "Catalyst":  cat_label + excl_note,
-                    "Catalyst_key": cat_label,
+                    "Catalyst":  cat_label,
                     "slope":     round(coeffs[0], 6),
                     "intercept": round(coeffs[1], 6),
                     "R²":        round(r2_lin, 4),
@@ -1402,51 +1388,42 @@ def _tab_linearization(cfg, uploaded):
     if not summary_rows:
         return
 
-    # ── Build pivot using Catalyst_key (without excl note) ───────
+    # ── Build pivot: best model per catalyst (highest linear R²) ──
     df_sum = pd.DataFrame(summary_rows)
 
-    # Exclude Elovich/Double-Exp from best selection
-    df_eligible = df_sum[~df_sum["Model"].isin({"Elovich", "Double-Exponential"})]
-    if df_eligible.empty:
-        df_eligible = df_sum
+    # Exclude same models as Tab 1 from "best" selection
+    df_sum_eligible = df_sum[~df_sum["Model"].isin(
+        {m.split("  |")[0].strip() for m in [
+            "Elovich", "Double-Exponential"]}
+    )]
+    if df_sum_eligible.empty:
+        df_sum_eligible = df_sum  # fallback if all excluded
 
+    # For each catalyst find the model with max R² (from eligible models only)
     best_linear = (
-        df_eligible.loc[df_eligible.groupby("Catalyst_key")["R²"].idxmax()]
-        .set_index("Catalyst_key")[["Model", "Catalyst", "R²"]]
-        .rename(columns={"Model":    "Best model (linear R²)",
-                         "Catalyst": "Catalyst (note)",
-                         "R²":       "Best R²"})
+        df_sum_eligible.loc[df_sum_eligible.groupby("Catalyst")["R²"].idxmax()]
+        .set_index("Catalyst")[["Model", "R²"]]
+        .rename(columns={"Model": "Best model (linear R²)",
+                         "R²":    "Best R²"})
     )
 
+    # Pivot so each row = one catalyst, columns = models
     df_pivot = df_sum.pivot_table(
-        index="Catalyst_key", columns="Model", values="R²"
-    ).reset_index().rename(columns={"Catalyst_key": "Catalyst"})
+        index="Catalyst", columns="Model", values="R²"
+    ).reset_index()
     df_pivot.columns.name = None
-    df_pivot = df_pivot.merge(
-        best_linear[["Best model (linear R²)","Best R²"]],
-        left_on="Catalyst", right_index=True, how="left")
+
+    # Merge best-model column
+    df_pivot = df_pivot.merge(best_linear, on="Catalyst", how="left")
+
+    # Reorder: Catalyst | Best model | Best R² | individual model R²s
     model_cols = [c for c in df_pivot.columns
-                  if c not in ("Catalyst","Best model (linear R²)","Best R²")]
-    df_pivot = df_pivot[["Catalyst","Best model (linear R²)","Best R²"] + model_cols]
+                  if c not in ("Catalyst", "Best model (linear R²)", "Best R²")]
+    df_pivot = df_pivot[["Catalyst", "Best model (linear R²)", "Best R²"] + model_cols]
 
     st.markdown("---")
     st.markdown("### 🏆 Best Model by Linear R²")
-    st.caption(
-        "⚠️ With < 4 points after saturation exclusion, linear R² is unreliable. "
-        "**Use Tab 1 (AICc) as the authoritative model selection.**")
-    # Flag catalysts with few points
-    pts_per_cat = {}
-    for col in removal_cols:
-        rem_all = df[col].dropna().values[:len(t_raw)].astype(float)
-        t_u, _, _ = _apply_autosat(t_raw, rem_all)
-        pts_per_cat[col.replace(" Removal (%)","").strip()] = len(t_u)
-
-    best_df = best_linear[["Best model (linear R²)","Best R²"]].reset_index()
-    best_df.columns = ["Catalyst","Best model (linear R²)","Best R²"]
-    best_df["Points used"] = best_df["Catalyst"].map(pts_per_cat)
-    best_df["Note"] = best_df["Points used"].apply(
-        lambda n: "⚠️ < 4 pts — see Tab 1" if n < 4 else "")
-    st.dataframe(best_df, use_container_width=True, hide_index=True)
+    st.dataframe(best_linear.reset_index(), use_container_width=True, hide_index=True)
 
     st.markdown("### 📋 All Models — R² Comparison")
     st.dataframe(df_pivot, use_container_width=True, hide_index=True)
@@ -1454,8 +1431,8 @@ def _tab_linearization(cfg, uploaded):
     st.info(
         "**How to interpret:** Use **Tab 1 (AICc + parsimony)** as the primary "
         "model selection. Use **Tab 2 (linear R²)** as supporting visual evidence. "
-        "Saturation points are excluded from both fitting and plotting — "
-        "only the linear kinetic region is shown."
+        "With only 5–6 points, **Pseudo-second-order** and **L-H** are generally "
+        "more physically meaningful than Elovich or Power-Law."
     )
 
 
@@ -1800,6 +1777,13 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
     model_names = MODEL_NAMES
     model_choice_arr = st.selectbox("Kinetic model for k extraction",
         ["Best (AICc)","Pseudo-first","Pseudo-second-order","L-H"], index=0, key="arr_model_choice")
+    if model_choice_arr == "Best (AICc)":
+        st.warning(
+            "⚠️ **Warning:** 'Best (AICc)' may select **different models at different temperatures**, "
+            "which violates the assumption of a constant reaction mechanism. "
+            "Ea extracted from mixed-model k(T) values is physically meaningless. "
+            "Select a **single fixed model** (e.g. Pseudo-second-order) for a valid Arrhenius plot."
+        )
     if st.button("▶ Run Arrhenius Fitting", key="run_arrhenius"):
         results_per_T = {}; catalyst_names_all = None
         progress = st.progress(0)
