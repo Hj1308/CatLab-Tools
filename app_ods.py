@@ -826,15 +826,25 @@ def create_advanced_template(cfg, filename="ODS_Advanced_Template_With_Metadata.
         "Instructions": [
             "1. Review and edit the Metadata sheet if needed (settings from sidebar are pre-filled).",
             "2. Fill Time (min) and Removal (%) columns in the Raw_Data sheet with your experimental data.",
-            "3. Save the file and upload it in the app.",
-            "4. The app converts units, fits multiple kinetic models (incl. pseudo-second-order), and selects the best one using AICc."
+            "3. Fill the Catalyst_Properties sheet with BET surface area for each catalyst (used in Tab 4 Option B).",
+            "4. Save the file and upload it in the app.",
+            "5. The app converts units, fits multiple kinetic models (incl. pseudo-second-order), and selects the best one using AICc.",
+            "6. In Tab 4, choose Option B (Carbon-based) to get mass-normalized TOF using BET values from this file."
         ]
+    })
+
+    # Catalyst_Properties sheet — for Tab 4 Option B (carbon-based TOF)
+    df_cat_props = pd.DataFrame({
+        "Catalyst": ["Cat-A", "Cat-B"],
+        "BET (m²/g)": [250.0, 310.0],
+        "Notes": ["BET from N₂ adsorption (77 K)", ""]
     })
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
         df_meta.to_excel(writer, sheet_name="Metadata", index=False)
         df_raw.to_excel(writer, sheet_name="Raw_Data", index=False)
+        df_cat_props.to_excel(writer, sheet_name="Catalyst_Properties", index=False)
         instructions.to_excel(writer, sheet_name="Instructions", index=False)
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
@@ -1485,12 +1495,7 @@ _SITE_DENSITY_PRESETS = {
 
 def _tab_ton_tof(cfg, uploaded):
     st.header("⚗️ Tab 4 — TON & TOF")
-    st.markdown("""
-**Definitions:**
-- **TON** = n_substrate_converted / n_active_sites &nbsp;(dimensionless)
-- **TOF** (min⁻¹) = TON / t_reaction
-- **n_active_sites** can be entered directly (Option 1) or estimated from BET + material type (Option 2)
-    """)
+
     if uploaded is None: st.info("Upload a file above."); return
     df, time_col, removal_cols = _load_kinetic_data(uploaded)
     if df is None: return
@@ -1498,106 +1503,272 @@ def _tab_ton_tof(cfg, uploaded):
     C0 = cfg["C0"]; V = cfg["V_fuel"]; m = cfg["m_cat"]
     if C0 is None: st.error("C₀ conversion failed."); return
 
-    method_choice = st.radio(
-        "How to define active site density?",
-        ["Option 1 — Direct input (from TPD / TPR / chemisorption / titration)",
-         "Option 2 — Estimate from BET surface area + material type"],
-        horizontal=True)
+    # ── Catalyst type selector ────────────────────────────────────
+    cat_type = st.radio(
+        "Catalyst type",
+        ["Option A — Metal / Metal Oxide  (site-based TON & TOF)",
+         "Option B — Carbon-based / Metal-free  (mass-normalized TOF)"],
+        horizontal=False)
 
-    if "Option 1" in method_choice:
-        st.markdown("#### Direct input")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            site_density = st.number_input(
-                "Active site density (mmol/g catalyst)",
-                min_value=0.0001, value=0.5, step=0.05,
-                help="From NH₃-TPD, H₂-TPR, CO chemisorption, Boehm titration, etc.")
-        with col_b:
-            char_method = st.selectbox(
-                "Characterisation method used",
-                ["NH₃-TPD", "H₂-TPR", "CO chemisorption",
-                 "Pyridine-FTIR", "Boehm titration",
-                 "XPS", "³¹P NMR (POM)", "Formula-based", "Other"])
-        n_sites_mol = site_density * 1e-3 * m
-        st.info(f"n_active_sites = **{n_sites_mol*1e6:.3f} µmol** "
-                f"({site_density} mmol/g × {m} g catalyst) — method: {char_method}")
-    else:
-        st.markdown("#### BET-based estimation")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            s_bet = st.number_input("BET surface area (m²/g)",
-                                    min_value=0.1, value=100.0, step=10.0)
-            mat_type = st.selectbox("Material family", list(_SITE_DENSITY_PRESETS.keys()))
-        preset = _SITE_DENSITY_PRESETS[mat_type]
-        with col_b:
-            if preset["rho"] is not None:
-                rho_default = float(preset["rho"])
-                st.markdown(f"""
+    # ════════════════════════════════════════════════════════════════
+    # OPTION A — Site-based TON & TOF (existing logic)
+    # ════════════════════════════════════════════════════════════════
+    if "Option A" in cat_type:
+        st.markdown("""
+**Definitions (site-based):**
+- **TON** = n_substrate_converted / n_active_sites &nbsp;(dimensionless)
+- **TOF** (min⁻¹) = TON / t_reaction
+- **n_active_sites** from direct measurement or BET + ρ_site
+        """)
+        method_choice = st.radio(
+            "How to define active site density?",
+            ["Option 1 — Direct input (from TPD / TPR / chemisorption / titration)",
+             "Option 2 — Estimate from BET surface area + material type"],
+            horizontal=True)
+
+        if "Option 1" in method_choice:
+            st.markdown("#### Direct input")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                site_density = st.number_input(
+                    "Active site density (mmol/g catalyst)",
+                    min_value=0.0001, value=0.5, step=0.05,
+                    help="From NH₃-TPD, H₂-TPR, CO chemisorption, Boehm titration, etc.")
+            with col_b:
+                char_method = st.selectbox(
+                    "Characterisation method used",
+                    ["NH₃-TPD", "H₂-TPR", "CO chemisorption",
+                     "Pyridine-FTIR", "Boehm titration",
+                     "XPS", "³¹P NMR (POM)", "Formula-based", "Other"])
+            n_sites_mol = site_density * 1e-3 * m
+            st.info(f"n_active_sites = **{n_sites_mol*1e6:.3f} µmol** "
+                    f"({site_density} mmol/g × {m} g catalyst) — method: {char_method}")
+        else:
+            st.markdown("#### BET-based estimation")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                s_bet = st.number_input("BET surface area (m²/g)",
+                                        min_value=0.1, value=100.0, step=10.0)
+                mat_type = st.selectbox("Material family", list(_SITE_DENSITY_PRESETS.keys()))
+            preset = _SITE_DENSITY_PRESETS[mat_type]
+            with col_b:
+                rho_default = float(preset["rho"]) if preset["rho"] is not None else 1.0
+                if preset["rho"] is not None:
+                    st.markdown(f"""
 **Typical ρ_site for {mat_type.split('(')[0].strip()}:**
 - Range: **{preset["range"]} µmol/m²**
 - Recommended method: *{preset["method"]}*
-                """)
-            else:
-                rho_default = 1.0
-                st.markdown("Enter your own ρ_site value below.")
-            rho_site = st.number_input(
-                "ρ_site — active site surface density (µmol/m²)",
-                min_value=0.01, value=rho_default, step=0.1,
-                help="Override the preset if you have measured this value.")
-        n_sites_mol = s_bet * m * rho_site * 1e-6
-        site_density_equiv = (n_sites_mol * 1e3) / m if m > 0 else float("nan")
-        st.info(
-            f"n_active_sites = S_BET × m × ρ_site = "
-            f"{s_bet} × {m} × {rho_site} µmol/m² = "
-            f"**{n_sites_mol*1e6:.3f} µmol** "
-            f"(≡ {site_density_equiv:.4f} mmol/g)")
-        with st.expander("ℹ️ How ρ_site is estimated per material family", expanded=False):
-            st.markdown("""
-| Material | ρ_site (µmol/m²) | Basis |
-|----------|-----------------|-------|
-| Metal oxides (MoO₃, V₂O₅, WO₃) | 1–5 | NH₃-TPD acid sites; terminal M=O counted as active |
-| Zeolites (ZSM-5, USY, Beta) | 2–10 | Pyridine-FTIR Brønsted + Lewis; strong acid sites for ODS |
-| POMs (HPW, PMo) | 0.5–3 | Keggin unit density on support; ³¹P NMR quantification |
-| Graphene / rGO / GO | 0.5–4 | Boehm titration (COOH + C=O + OH groups); XPS O/C ratio |
-| g-C₃N₄ / carbon nitride | 1–6 | Pyridinic + pyrrolic N from XPS N 1s; NH₃-TPD base sites |
-| N-doped carbon / N-graphene | 1–5 | XPS N atomic % × BET; pyridinic N as primary active site |
-| MOF-derived porous carbon | 0.5–4 | Boehm titration; CO₂-TPD for basic sites |
-| Supported metals (Pd, Pt, Au) | 0.1–2 | CO chemisorption dispersion; TEM particle size → metal surface |
+                    """)
+                else:
+                    st.markdown("Enter your own ρ_site value below.")
+                rho_site = st.number_input(
+                    "ρ_site — active site surface density (µmol/m²)",
+                    min_value=0.01, value=rho_default, step=0.1)
+            n_sites_mol = s_bet * m * rho_site * 1e-6
+            st.info(
+                f"n_active_sites = S_BET × m × ρ_site = "
+                f"{s_bet} × {m} × {rho_site} µmol/m² = "
+                f"**{n_sites_mol*1e6:.3f} µmol**")
 
-> **Note:** These are literature-based estimates. If you have measured site density directly (TPD, TPR, chemisorption), use **Option 1** for higher accuracy.
+        st.markdown("---")
+        st.markdown("### 📋 TON & TOF Results")
+        if n_sites_mol <= 0:
+            st.error("n_active_sites = 0. Check your inputs."); return
+        rows = []
+        for col in removal_cols:
+            removal = df[col].dropna().values[:len(t)].astype(float)
+            cat_label = col.replace(" Removal (%)","").strip()
+            X_final = removal[-1] / 100.0
+            n_conv  = C0 * V * X_final
+            t_rxn   = t[-1]
+            ton = n_conv / n_sites_mol
+            tof = ton / t_rxn if t_rxn > 0 else float("nan")
+            rows.append({
+                "Catalyst":       cat_label,
+                "X_final (%)":    round(removal[-1], 1),
+                "n_conv (µmol)":  round(n_conv * 1e6, 3),
+                "n_sites (µmol)": round(n_sites_mol * 1e6, 3),
+                "TON":            round(ton, 3),
+                "TOF (min⁻¹)":    f"{tof:.5f}" if not np.isnan(tof) else "N/A",
+                "TOF (h⁻¹)":      f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        if len(rows) > 1:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            cats = [r["Catalyst"] for r in rows]
+            tofs = [float(r["TOF (h⁻¹)"]) if r["TOF (h⁻¹)"] != "N/A" else 0 for r in rows]
+            bars = ax.bar(cats, tofs, color=COLORS[:len(cats)],
+                          edgecolor="black", linewidth=0.8)
+            ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=9)
+            ax.set_ylabel("TOF (h⁻¹)"); ax.set_title("Turnover Frequency Comparison")
+            fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+
+    # ════════════════════════════════════════════════════════════════
+    # OPTION B — Mass-normalized TOF for carbon-based catalysts
+    # ════════════════════════════════════════════════════════════════
+    else:
+        st.markdown("""
+**Why mass-normalized for carbon-based catalysts?**
+For metal-free graphene-like materials, defining "active sites" is ambiguous —
+XPS gives total heteroatom content, not just catalytically active sites, and
+BET area includes pores inaccessible to DBT. Mass-normalized TOF is the
+standard in the ODS literature for carbon-based catalysts.
+
+**Definitions:**
+- **TOF_mass** (mmol·g⁻¹·min⁻¹) = n_DBT_removed / (m_cat × t_reaction)
+- **TOF_BET** (mmol·m⁻²·min⁻¹) = TOF_mass / BET_area  *(if BET available)*
+- **r₀/m** (mmol·g⁻¹·min⁻¹) = initial rate per gram catalyst
+        """)
+
+        # ── Try to read BET from Excel sheet ─────────────────────
+        bet_per_cat = {}
+        try:
+            if uploaded.name.endswith(".xlsx") or uploaded.name.endswith(".xls"):
+                xl = pd.ExcelFile(uploaded)
+                if "Catalyst_Properties" in xl.sheet_names:
+                    df_props = pd.read_excel(uploaded, sheet_name="Catalyst_Properties")
+                    # Normalize column names
+                    df_props.columns = [c.strip().lower() for c in df_props.columns]
+                    # Find catalyst name column and BET column
+                    cat_col  = next((c for c in df_props.columns if "catalyst" in c), None)
+                    bet_col  = next((c for c in df_props.columns if "bet" in c), None)
+                    if cat_col and bet_col:
+                        for _, row_p in df_props.iterrows():
+                            cat_name = str(row_p[cat_col]).strip()
+                            bet_val  = row_p[bet_col]
+                            if pd.notna(bet_val):
+                                bet_per_cat[cat_name] = float(bet_val)
+                        st.success(f"✅ BET data loaded from **Catalyst_Properties** sheet "
+                                   f"({len(bet_per_cat)} catalysts).")
+        except Exception:
+            pass
+
+        if bet_per_cat:
+            st.markdown("**BET values from file:**")
+            bet_df = pd.DataFrame(
+                [{"Catalyst": k, "BET (m²/g)": v} for k, v in bet_per_cat.items()])
+            st.dataframe(bet_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ No **Catalyst_Properties** sheet found in the uploaded file. "
+                    "Enter BET values manually below, or add a sheet named "
+                    "**Catalyst_Properties** with columns: *Catalyst* and *BET (m²/g)*.")
+
+        # ── Manual BET entry per catalyst ──────────────────────────
+        st.markdown("#### BET surface area per catalyst")
+        st.caption("Values from file are pre-filled. Edit if needed. "
+                   "Leave at 0 to skip TOF_BET for that catalyst.")
+        n_cols_ui = min(len(removal_cols), 3)
+        cols_ui   = st.columns(n_cols_ui)
+        bet_inputs = {}
+        for ci, col in enumerate(removal_cols):
+            cat_label = col.replace(" Removal (%)","").strip()
+            # Match from file (try exact, then partial)
+            default_bet = bet_per_cat.get(cat_label, 0.0)
+            if default_bet == 0.0:
+                for k, v in bet_per_cat.items():
+                    if k.lower() in cat_label.lower() or cat_label.lower() in k.lower():
+                        default_bet = v; break
+            with cols_ui[ci % n_cols_ui]:
+                bet_inputs[col] = st.number_input(
+                    f"**{cat_label}** BET (m²/g)",
+                    min_value=0.0, value=float(default_bet), step=10.0,
+                    key=f"bet_b_{col}")
+
+        st.markdown("---")
+        st.markdown("### 📋 Mass-Normalized TOF Results")
+
+        rows = []
+        for col in removal_cols:
+            removal  = df[col].dropna().values[:len(t)].astype(float)
+            cat_label = col.replace(" Removal (%)","").strip()
+            X_final  = removal[-1] / 100.0
+            n_conv   = C0 * V * X_final          # mol
+            t_rxn    = t[-1]                     # min
+
+            # TOF_mass = n_conv (mmol) / (m_cat(g) × t(min))
+            tof_mass_mmol = (n_conv * 1000) / (m * t_rxn) if (m > 0 and t_rxn > 0) else float("nan")
+
+            # TOF_BET
+            bet_val = bet_inputs[col]
+            if bet_val > 0:
+                tof_bet = tof_mass_mmol / bet_val   # mmol/(m²·min)
+            else:
+                tof_bet = float("nan")
+
+            row = {
+                "Catalyst":                   cat_label,
+                "X_final (%)":                round(removal[-1], 1),
+                "n_conv (µmol)":              round(n_conv * 1e6, 3),
+                "TOF_mass (mmol·g⁻¹·min⁻¹)": f"{tof_mass_mmol:.5f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "TOF_mass (µmol·g⁻¹·min⁻¹)": f"{tof_mass_mmol*1000:.3f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "TOF_mass (mmol·g⁻¹·h⁻¹)":   f"{tof_mass_mmol*60:.4f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "BET (m²/g)":                 round(bet_val, 1) if bet_val > 0 else "—",
+                "TOF_BET (mmol·m⁻²·min⁻¹)":  f"{tof_bet:.6f}" if not np.isnan(tof_bet) else "—",
+            }
+            rows.append(row)
+
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+        # ── Bar charts ────────────────────────────────────────────
+        cats = [r["Catalyst"] for r in rows]
+
+        col_chart1, col_chart2 = st.columns(2)
+        with col_chart1:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            vals = [float(r["TOF_mass (µmol·g⁻¹·min⁻¹)"]) if r["TOF_mass (µmol·g⁻¹·min⁻¹)"] != "N/A" else 0
+                    for r in rows]
+            bars = ax.bar(cats, vals, color=COLORS[:len(cats)],
+                          edgecolor="black", linewidth=0.8)
+            ax.bar_label(bars, fmt="%.2f", padding=2, fontsize=8)
+            ax.set_ylabel("TOF_mass (µmol·g⁻¹·min⁻¹)")
+            ax.set_title("Mass-normalized TOF")
+            ax.tick_params(axis='x', rotation=30)
+            fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+
+        with col_chart2:
+            bet_rows = [r for r in rows if r["TOF_BET (mmol·m⁻²·min⁻¹)"] != "—"]
+            if bet_rows:
+                fig2, ax2 = plt.subplots(figsize=(6, 4))
+                cats2 = [r["Catalyst"] for r in bet_rows]
+                vals2 = [float(r["TOF_BET (mmol·m⁻²·min⁻¹)"]) for r in bet_rows]
+                bars2 = ax2.bar(cats2, vals2, color=COLORS[:len(cats2)],
+                                edgecolor="black", linewidth=0.8)
+                ax2.bar_label(bars2, fmt="%.5f", padding=2, fontsize=8)
+                ax2.set_ylabel("TOF_BET (mmol·m⁻²·min⁻¹)")
+                ax2.set_title("BET-normalized TOF")
+                ax2.tick_params(axis='x', rotation=30)
+                fig2.tight_layout(); st.pyplot(fig2); plt.close(fig2)
+            else:
+                st.info("Enter BET values above to see TOF_BET chart.")
+
+        # ── Download ──────────────────────────────────────────────
+        csv_buf = io.StringIO()
+        pd.DataFrame(rows).to_csv(csv_buf, index=False)
+        st.download_button("⬇️ Download TOF results (CSV)",
+                           csv_buf.getvalue(),
+                           "tof_carbon_based.csv", "text/csv")
+
+        with st.expander("📚 Scientific basis & reporting guidance", expanded=False):
+            st.markdown("""
+**Why mass-normalized TOF for metal-free carbon catalysts?**
+
+For graphene-like, N/B-doped carbon, BCN, and similar materials:
+- XPS gives **total** heteroatom content — pyridinic, pyrrolic, graphitic N are
+  all reported, but only pyridinic N (and possibly pyrrolic) is catalytically active.
+- BET area includes micropores and mesopores inaccessible to DBT (MW=184 g/mol).
+- No universal method exists to quantify "active sites" for metal-free ODS catalysts.
+
+**Recommended reporting:**
+- Primary: **TOF_mass (µmol·g⁻¹·min⁻¹)** — comparable across literature.
+- Secondary: **TOF_BET (mmol·m⁻²·min⁻¹)** — useful for comparing catalysts
+  with very different surface areas.
+- Note explicitly in the paper that TOF is mass-normalized, not site-normalized.
+
+**References:**
+- Astle et al., *ACS Catal.* 2022 — mass-normalized TOF for carbon ODS catalysts.
+- Dou et al., *Appl. Catal. B* 2020 — BET-normalized activity for N-doped carbons.
             """)
 
-    st.markdown("---")
-    st.markdown("### 📋 TON & TOF Results")
-    if n_sites_mol <= 0:
-        st.error("n_active_sites = 0. Check your inputs."); return
-    rows = []
-    for col in removal_cols:
-        removal = df[col].dropna().values[:len(t)].astype(float)
-        X_final = removal[-1] / 100.0
-        n_conv  = C0 * V * X_final
-        t_rxn   = t[-1]
-        ton = n_conv / n_sites_mol
-        tof = ton / t_rxn if t_rxn > 0 else float("nan")
-        rows.append({
-            "Catalyst":       col,
-            "X_final (%)":    round(removal[-1], 1),
-            "n_conv (µmol)":  round(n_conv * 1e6, 3),
-            "n_sites (µmol)": round(n_sites_mol * 1e6, 3),
-            "TON":            round(ton, 3),
-            "TOF (min⁻¹)":    f"{tof:.5f}" if not np.isnan(tof) else "N/A",
-            "TOF (h⁻¹)":      f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    if len(rows) > 1:
-        fig, ax = plt.subplots(figsize=(7, 4))
-        cats  = [r["Catalyst"] for r in rows]
-        tofs  = [float(r["TOF (h⁻¹)"]) if r["TOF (h⁻¹)"] != "N/A" else 0 for r in rows]
-        bars  = ax.bar(cats, tofs, color=COLORS[:len(cats)],
-                       edgecolor="black", linewidth=0.8)
-        ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=9)
-        ax.set_ylabel("TOF (h⁻¹)"); ax.set_title("Turnover Frequency Comparison")
-        fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
 
 # ================================================================
