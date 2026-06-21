@@ -125,7 +125,7 @@ The app reads BET values automatically and pre-fills the input fields.
 
 Upload one kinetic data file per temperature. The app fits each dataset, extracts k(T), then fits:
 
-$$k(T) = A \cdot \exp\!\left(-\frac{E_a}{RT}\right)$$
+k(T) = A · exp(−Eₐ / RT)
 
 Reports Eₐ and A with **95% confidence intervals**.
 
