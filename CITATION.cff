@@ -1,18 +1,54 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
+message: "If you use this software in your research, please cite it as below."
 title: "CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite"
-version: 3.5.1
+version: 3.5.3
 doi: 10.5281/zenodo.20753374
-date-released: 2026-06-18
+date-released: 2026-06-21
+license: MIT
+repository-code: https://github.com/Hj1308/CatLab-Tools
+url: https://github.com/Hj1308/CatLab-Tools
+abstract: >
+  A Streamlit-based web application for oxidative desulfurization (ODS)
+  kinetic analysis. Implements nine nonlinear kinetic models (including
+  Langmuir-Hinshelwood, pseudo-second-order, and Power-Law) with AICc-based
+  model selection, auto-saturation detection, mass-normalized TOF for
+  metal-free carbon catalysts, Arrhenius multi-temperature analysis, and
+  residual diagnostics. Designed for PhD-level catalysis research on
+  graphene-like metal-free catalysts.
 authors:
   - family-names: Jafari
     given-names: Hoda
+    alias: Hj1308
     orcid: ""
-repository-code: https://github.com/Hj1308/CatLab-Tools
-license: MIT
 keywords:
   - oxidative desulfurization
+  - ODS
   - kinetics
   - Langmuir-Hinshelwood
-  - catalysis
+  - pseudo-second-order
+  - AICc model selection
+  - carbon catalysts
+  - metal-free catalysts
   - streamlit
+  - catalysis
+references:
+  - type: article
+    title: "Kinetic study of oxidative desulfurization of model fuel using UiO-66-NO2 metal-organic framework"
+    authors:
+      - family-names: Barghi
+        given-names: S.H.
+    journal: ACS Omega
+    year: 2025
+    volume: 10
+    pages: 15947-15958
+    doi: 10.1021/acsomega.4c06722
+  - type: article
+    title: "Kinetic study of deep desulfurization of light crude oil and its fractions by oxidation"
+    authors:
+      - family-names: Dhir
+        given-names: S.
+    journal: Journal of Hazardous Materials
+    year: 2009
+    volume: 161
+    pages: 1360-1368
+    doi: 10.1016/j.jhazmat.2008.04.099
