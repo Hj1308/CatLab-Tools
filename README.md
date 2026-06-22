@@ -174,9 +174,7 @@ C₀ [mol/L] = C [mg S/L] / (MW_S [g/mol] × 10³)
 | Initial sulfur concentration | 250 | ppmS (mg S / L fuel, volumetric) |
 | Model solvent | n-Heptane | ρ = 0.684 g/mL |
 | **C₀ (mol/L)** | **7.798 × 10⁻³** | 250 / 32.06 / 1000 |
-| Fuel volume | 2 | mL |
-| Catalyst mass | 5 | mg |
-| O/S molar ratio | ~628 | H₂O₂ large excess |
+| O/S molar ratio | 0.5 | 
 
 ---
 
