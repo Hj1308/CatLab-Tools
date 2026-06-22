@@ -114,8 +114,8 @@ TOF_BET  (mmol·m⁻²·min⁻¹) = TOF_mass / BET_area
 
 | Catalyst | BET (m²/g) | Notes |
 |----------|------------|-------|
-| g-SiC | 96.3 | N₂ adsorption, 77 K |
-| g-NSiC | 204.0 | |
+| g-SiC | 150 | N₂ adsorption, 77 K |
+| g-NSiC | 250 | |
 
 The app reads BET values automatically and pre-fills the input fields.
 
