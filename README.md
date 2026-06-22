@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-
+![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
 **ODS Calculation Suite — v3.5.3**
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
