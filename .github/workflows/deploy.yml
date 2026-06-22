@@ -1,0 +1,44 @@
+name: Deploy — Streamlit App Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app_ods.py'
+      - 'catlab/**'
+      - 'requirements.txt'
+
+jobs:
+  validate-app:
+    name: Validate Streamlit App
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install streamlit
+
+      - name: Check app syntax
+        run: |
+          python -m py_compile app_ods.py
+          echo "✅ app_ods.py syntax OK"
+
+      - name: Check all catlab modules
+        run: |
+          for f in catlab/*.py; do
+            python -m py_compile "$f" && echo "✅ $f OK"
+          done
+
+      - name: Notify deployment readiness
+        run: |
+          echo "🚀 App validated successfully — ready for Streamlit Cloud deployment."
