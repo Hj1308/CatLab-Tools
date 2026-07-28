@@ -11,9 +11,6 @@
 **ODS Calculation Suite — v3.5.3**
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
-> **Surface area & pore analysis (BET/BJH/T-Plot)?**
-> → See [BET_analyser](https://github.com/Hj1308/BET_analyser)
-
 ---
 
 ## What is CatLab-Tools?
@@ -225,7 +222,7 @@ CatLab-Tools/
 | Repo | Purpose |
 |------|---------|
 | [BET_analyser](https://github.com/Hj1308/BET_analyser) | BET, BJH, T-Plot, isotherm & hysteresis |
-| [EISforge-](https://github.com/Hj1308/EISforge-) | EIS analysis + ML |
+| [EISForge](https://github.com/Hj1308/EISforge) | EIS analysis + ML |
 | [sem-particle-analyzer](https://github.com/Hj1308/sem-particle-analyzer) | SEM particle sizing |
 | [Raman-analysis](https://github.com/Hj1308/Raman-analysis) | Raman spectroscopy toolkit |
 
