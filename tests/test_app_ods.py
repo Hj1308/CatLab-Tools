@@ -61,3 +61,36 @@ class TestNonConvergedSentinelHandling:
         app_ods._tab_residuals({"C0": 0.015}, MagicMock())  # must return, not KeyError
 
         assert st.error.called
+
+
+class TestAutoSaturationDetection:
+    """Regression: case #1 — Layer 2 fires on the last point (increment in
+    [8, 15)) even though Layer 1 does not, and the exclusion flips the AICc
+    best-model choice from L-H to Power-Law."""
+
+    T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
+    REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 91.0])
+
+    @staticmethod
+    def _best(t, rem, c0):
+        Ct = c0 * (1.0 - np.asarray(rem, dtype=float) / 100.0)
+        res = app_ods._fit_nonlinear(np.asarray(t, dtype=float), Ct, c0)
+        best = app_ods._best_model(res, app_ods.MODEL_NAMES)
+        return best, res[best]["R2"] if best else None
+
+    def test_excludes_only_last_point(self):
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
+        assert excl == [6]
+        assert t_keep.tolist() == [0.0, 0.5, 1.0, 2.0, 3.0, 4.0]
+        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0, 80.0]
+
+    def test_best_model_flips_without_vs_with_exclusion(self):
+        c0 = 500.0 / 32.06 / 1000.0
+        best_before, _ = self._best(self.T, self.REM, c0)
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
+        assert excl == [6]
+        best_after, _ = self._best(t_keep, rem_keep, c0)
+
+        assert best_before == "L-H"
+        assert best_after == "Power-Law"
+        assert best_before != best_after

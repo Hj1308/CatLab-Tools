@@ -703,6 +703,34 @@ def _best_model(res, model_names):
                key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
 
 
+def _auto_saturation_exclusions(t_raw, rem_raw,
+                                sat_thresh_1=8.0, sat_thresh_2=15.0):
+    """
+    Determine which raw points the auto-saturation rule drops.
+
+    Layer 1: if the last removal increment < sat_thresh_1, drop the last point.
+    Layer 2: then, unconditionally (even if Layer 1 removed nothing), if the last
+             increment < sat_thresh_2, drop the (new) last point. Because Layer 2
+             always tests the last interval, a final increment in
+             [sat_thresh_1, sat_thresh_2) still costs one data point.
+
+    Returns (excluded_time_points, t_keep, rem_keep).
+    """
+    t_keep   = np.asarray(t_raw, dtype=float).copy()
+    rem_keep = np.asarray(rem_raw, dtype=float).copy()
+    excluded = []
+    if len(rem_keep) >= 3:
+        if (rem_keep[-1] - rem_keep[-2]) < sat_thresh_1:
+            excluded.append(int(t_keep[-1]))
+            t_keep   = t_keep[:-1]
+            rem_keep = rem_keep[:-1]
+        if len(rem_keep) >= 3 and (rem_keep[-1] - rem_keep[-2]) < sat_thresh_2:
+            excluded.append(int(t_keep[-1]))
+            t_keep   = t_keep[:-1]
+            rem_keep = rem_keep[:-1]
+    return excluded, t_keep, rem_keep
+
+
 # ================================================================
 # SIDEBAR — universal settings
 # ================================================================
@@ -1036,10 +1064,13 @@ def _tab_kinetics(cfg, uploaded):
     all_results    = {}
     t_fit_per_cat  = {}
     Ct_fit_per_cat = {}
+    auto_excl_per_cat = {}
+    t_pre_per_cat     = {}
+    rem_pre_per_cat   = {}
 
-    # Auto-saturation thresholds
-    SAT_THRESH_1 = 8.0   # if last interval < 8% → remove last point
-    SAT_THRESH_2 = 15.0  # if penultimate interval also < 15% → remove that too
+    # Auto-saturation thresholds (exact semantics in _auto_saturation_exclusions)
+    SAT_THRESH_1 = 8.0   # Layer 1: last interval < 8% → drop last point
+    SAT_THRESH_2 = 15.0  # Layer 2: last interval < 15% → drop last point (also fires when Layer 1 did not remove)
 
     for col in removal_cols:
         removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
@@ -1048,19 +1079,25 @@ def _tab_kinetics(cfg, uploaded):
         t_keep      = t_raw[keep_mask]
         rem_keep    = removal_raw[keep_mask]
 
+        # Snapshot BEFORE auto-saturation, for the with/without comparison
+        t_pre_excl   = t_keep.copy()
+        rem_pre_excl = rem_keep.copy()
+
         # ── Auto-saturation detection (only when no manual exclusion) ──
-        auto_excl = []
-        if not excl_times and len(rem_keep) >= 3:
-            # Layer 1: last interval
-            if (rem_keep[-1] - rem_keep[-2]) < SAT_THRESH_1:
-                auto_excl.append(int(t_keep[-1]))
-                t_keep  = t_keep[:-1]
-                rem_keep = rem_keep[:-1]
-            # Layer 2: penultimate interval
-            if len(rem_keep) >= 3 and (rem_keep[-1] - rem_keep[-2]) < SAT_THRESH_2:
-                auto_excl.append(int(t_keep[-1]))
-                t_keep  = t_keep[:-1]
-                rem_keep = rem_keep[:-1]
+        # Semantics (verified on data, see _auto_saturation_exclusions): Layer 1
+        # drops the last point when its increment < SAT_THRESH_1; Layer 2 then tests
+        # the LAST interval again against SAT_THRESH_2 and drops the last point even
+        # if Layer 1 removed nothing — so a final increment in [SAT_THRESH_1,
+        # SAT_THRESH_2) still costs the last data point.
+        if not excl_times:
+            auto_excl, t_keep, rem_keep = _auto_saturation_exclusions(
+                t_keep, rem_keep, SAT_THRESH_1, SAT_THRESH_2)
+        else:
+            auto_excl = []
+
+        auto_excl_per_cat[col] = auto_excl
+        t_pre_per_cat[col]     = t_pre_excl
+        rem_pre_per_cat[col]   = rem_pre_excl
 
         if auto_excl:
             cat_label = col.replace(" Removal (%)","").strip()
@@ -1294,6 +1331,48 @@ def _tab_kinetics(cfg, uploaded):
             "Note":               " | ".join(notes),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+    # ── Auto-saturation details: with vs without exclusion ─────────
+    any_auto_excl = any(auto_excl_per_cat.get(c) for c in all_results)
+    if not any_auto_excl:
+        st.info("✅ No auto-saturation exclusion applied.")
+    else:
+        with st.expander("🔎 Auto-saturation details", expanded=True):
+            st.caption(
+                "Points dropped by the auto-saturation rule (last-interval increment "
+                f"< {SAT_THRESH_1}% then < {SAT_THRESH_2}%), and the best-model result "
+                "with vs without that exclusion. Best model = AICc selection, R² shown.")
+            det_rows = []
+            for col in all_results:
+                cat_label  = col.replace(" Removal (%)","").strip()
+                excl_pts   = auto_excl_per_cat.get(col, [])
+                best_with  = _best_model(all_results[col], model_names)
+                r2_with    = all_results[col][best_with]["R2"] if best_with else float("nan")
+                if excl_pts:
+                    t_pre    = t_pre_per_cat[col]
+                    rem_pre  = rem_pre_per_cat[col]
+                    Ct_pre   = C0 * (1 - rem_pre / 100.0)
+                    if add_t0 and not has_t0:
+                        t_pre_fit  = np.concatenate(([0.0], t_pre))
+                        Ct_pre_fit = np.concatenate(([C0], Ct_pre))
+                    else:
+                        t_pre_fit  = t_pre
+                        Ct_pre_fit = Ct_pre
+                    res_without  = _fit_nonlinear(t_pre_fit, Ct_pre_fit, C0)
+                    best_without = _best_model(res_without, model_names)
+                    r2_without   = res_without[best_without]["R2"] if best_without else float("nan")
+                else:
+                    best_without = best_with
+                    r2_without   = r2_with
+                det_rows.append({
+                    "Catalyst":                 cat_label,
+                    "Auto-excluded t (min)":    ", ".join(str(int(x)) for x in sorted(excl_pts)) if excl_pts else "—",
+                    "Best model WITHOUT excl.": best_without or "—",
+                    "R² (without)":             f"{r2_without:.4f}" if not np.isnan(r2_without) else "—",
+                    "Best model WITH excl.":    best_with or "—",
+                    "R² (with)":                f"{r2_with:.4f}" if not np.isnan(r2_with) else "—",
+                })
+            st.dataframe(pd.DataFrame(det_rows), use_container_width=True, hide_index=True)
 
     with st.expander("🔍 All models for each catalyst", expanded=False):
         for col, res in all_results.items():
