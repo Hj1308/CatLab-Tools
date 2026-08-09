@@ -475,8 +475,10 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
             "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)", "r0": k0, "r0_se": se[0],
         }
+    except (RuntimeError, ValueError) as e:
+        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Zero-order"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Pseudo-first-order
     try:
@@ -493,8 +495,10 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
             "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)", "r0": r0, "r0_se": se[0] * C0,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Pseudo-first"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Pseudo-second-order  (FIX T: concentration-based, k2 in L/mol/min)
     try:
@@ -511,8 +515,10 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
             "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)", "r0": r0, "r0_se": se[0] * C0 ** 2,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Pseudo-second-order"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Elovich
     try:
@@ -528,8 +534,10 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": _elovich_t_half(C0, alpha, beta),
             "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)", "r0": alpha, "r0_se": se[0],
         }
+    except (RuntimeError, ValueError) as e:
+        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Elovich"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Langmuir-Hinshelwood
     try:
@@ -549,8 +557,10 @@ def _fit_nonlinear(time, Ct, C0):
             "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)", "r0": r0, "r0_se": None,
             "K_ads": K_ads, "K_se": se[1], "regime": _regime,
         }
+    except (RuntimeError, ValueError) as e:
+        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["L-H"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Power-Law (General Reaction Order)
     try:
@@ -571,8 +581,10 @@ def _fit_nonlinear(time, Ct, C0):
             "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
             "col_k": "k_PL", "r0": r0, "r0_se": None,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Power-Law"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Eley-Rideal
     try:
@@ -593,8 +605,10 @@ def _fit_nonlinear(time, Ct, C0):
             "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
             "col_k": "k_ER", "r0": r0, "r0_se": None,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Eley-Rideal"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Avrami
     try:
@@ -614,8 +628,10 @@ def _fit_nonlinear(time, Ct, C0):
             "k": k_av, "k_se": se[0],
             "col_k": "k_Avrami", "r0": None, "r0_se": None,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Avrami"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     # Double Exponential
     try:
@@ -635,14 +651,16 @@ def _fit_nonlinear(time, Ct, C0):
             "k": k1, "k_se": se[0],
             "col_k": "k1 (fast)", "r0": None, "r0_se": None,
         }
+    except (RuntimeError, ValueError) as e:
+        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
     except Exception as e:
-        results["Double-Exponential"] = {"R2": -999, "aic": float("inf"), "aicc": float("inf"), "error": str(e)}
+        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
     return results
 
 
 def _get_valid_models(res, model_names):
-    return {m: res[m] for m in model_names if res[m].get("R2", -999) > -999}
+    return {m: res[m] for m in model_names if res[m].get("converged", True)}
 
 def _best_model(res, model_names):
     """
@@ -1284,7 +1302,7 @@ def _tab_kinetics(cfg, uploaded):
             subrows = []
             for m in model_names:
                 mr = res[m]
-                if mr.get("R2", -999) > -999:
+                if mr.get("converged", True):
                     subrows.append({
                         "Model":    m,
                         "k (±SE)":  _fmt_pm(mr.get("k"), mr.get("k_se")),
@@ -1971,7 +1989,7 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                 res = _fit_nonlinear(t, Ct, C0)
                 chosen = _best_model(res, model_names) if model_choice_arr == "Best (AICc)" \
                          else model_choice_arr
-                cat_k[col] = res[chosen]["k"] if (chosen and res[chosen].get("R2",-999) > -999) else None
+                cat_k[col] = res[chosen]["k"] if (chosen and res[chosen].get("converged", True)) else None
             results_per_T[T_K] = cat_k
             progress.progress((idx + 1) / len(uploaded_files))
         progress.empty()
@@ -2086,7 +2104,7 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     Ct_obs  = C0 * (1 - removal / 100.0)
     all_res = _fit_nonlinear(t, Ct_obs, C0)
     res = all_res[model_choice]
-    if res.get("R2", -999) <= -999:
+    if not res.get("converged", True):
         st.error(f"Model '{model_choice}' failed. Error: {res.get('error','unknown')}"); return
     Ct_pred   = res["pred"]
     residuals = Ct_obs - Ct_pred
@@ -2166,7 +2184,7 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
         comp_rows = []
         for m in model_names:
             mr = all_res_full[m]
-            if mr.get("R2",-999) <= -999:
+            if not mr.get("converged", True):
                 comp_rows.append({"Model": m, "R²": "fail", "AICc": "fail", "AIC": "fail",
                                   "RMSE (mmol/L)": "fail", "Shapiro-Wilk p": "fail"}); continue
             pred_m  = mr["pred"]; resid_m = Ct_obs - pred_m
