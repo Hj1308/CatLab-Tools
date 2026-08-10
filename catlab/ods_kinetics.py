@@ -17,7 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Optional
 import os
-from .kinetics_engine import _fit_nonlinear, _to_mol_L
+from .kinetics_engine import _fit_nonlinear, _to_mol_L, COLORS, MARKERS
 
 
 # -------------------------------------------------
@@ -130,10 +130,6 @@ def run_ods_analysis(
     xl       = pd.ExcelFile(excel_path)
     sheets   = xl.sheet_names
 
-    colors  = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
-               "#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
-    markers = ["o","s","^","D","v","P","*","X","h"]
-
     results   = []
     fits_data = {}
 
@@ -177,8 +173,8 @@ def run_ods_analysis(
             t_plot = np.insert(t_plot, 0, 0.0)
             X_plot = np.insert(X_plot, 0, 0.0)
         ax.plot(t_plot, X_plot,
-                marker=markers[i % len(markers)],
-                color=colors[i % len(colors)],
+                marker=MARKERS[i % len(MARKERS)],
+                color=COLORS[i % len(COLORS)],
                 label=sheet, lw=2, ms=8,
                 markeredgecolor="white", markeredgewidth=0.7)
     ax.set_xlabel("Time (min)", fontsize=13)
@@ -192,7 +188,7 @@ def run_ods_analysis(
     # ── PLOT 2: Zero-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y0"]
         k0 = fit["K0 (mol/L/min)"]
         t_fit = np.linspace(0, t[-1], 200)
@@ -210,7 +206,7 @@ def run_ods_analysis(
     # ── PLOT 3: Pseudo-first-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y1"]
         kapp = fit["Kapp (1/min)"]
         t_fit = np.linspace(0, t[-1], 200)
@@ -228,7 +224,7 @@ def run_ods_analysis(
     # ── PLOT 4: Second-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y2"]
         k2 = fit["K2 (L/mol/min)"]
         t_fit = np.linspace(0, t[-1], 200)

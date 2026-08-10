@@ -21,6 +21,8 @@ N_PARAMS = {
     "Avrami":              2,
     "Double-Exponential":  4,
 }
+COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
+MARKERS = ["o","s","^","D","v","P","*","X","h"]
 
 # Models excluded from automatic "best model" selection.
 # Eley-Rideal: structurally non-identifiable with this experiment type. Only

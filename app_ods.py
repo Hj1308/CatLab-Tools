@@ -94,6 +94,7 @@ import warnings
 
 from catlab.kinetics_engine import (
     MW_S, N_PARAMS, BEST_MODEL_EXCLUDE, MODEL_NAMES,
+    COLORS, MARKERS,
     _to_mol_L,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
     _power_law, _power_law_t_half, _eley_rideal, _avrami, _double_exponential,
@@ -146,8 +147,6 @@ plt.rcParams.update({
 
 # -- Constants ----------------------------------------------------
 R_GAS  = 8.314   # J/(mol·K)
-COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
-MARKERS = ["o","s","^","D","v","P","*","X","h"]
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
