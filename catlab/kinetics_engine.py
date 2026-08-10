@@ -1,0 +1,553 @@
+# catlab/kinetics_engine.py
+# Shared kinetics engine — CatLab-Tools
+# Model rate-law functions, nonlinear fitting, AICc model selection, and
+# concentration-unit converter. Used by both the Streamlit app (app_ods.py)
+# and the catlab CLI package.
+
+import numpy as np
+from scipy.optimize import curve_fit
+from scipy.integrate import odeint
+
+# -- Constants ----------------------------------------------------
+MW_S   = 32.06   # g/mol
+N_PARAMS = {
+    "Zero-order":          1,
+    "Pseudo-first":        1,
+    "Pseudo-second-order": 1,
+    "Elovich":             2,
+    "L-H":                 2,
+    "Power-Law":           2,
+    "Eley-Rideal":         2,
+    "Avrami":              2,
+    "Double-Exponential":  4,
+}
+
+# Models excluded from automatic "best model" selection.
+# Eley-Rideal: structurally non-identifiable with this experiment type. Only
+# single-species data (sulfur concentration vs time) are available, and for the
+# surface-reaction rate law the oxidant is held in excess (constant concentration
+# folded into the rate constant), which is the standard assumption here. Under
+# excess oxidant the Eley-Rideal curve shape is spanned by existing models:
+#   - low surface coverage  : theta_A ~ K_A*C_A (const) -> dC/dt = -k*C  == Pseudo-first
+#   - general coverage      : theta_A ~ K_A*C_A/(1+K_A*C_A) (const) -> the rational
+#     C/(1+KC) term == the Langmuir-Hinshelwood functional form
+# So no distinguishing curve shape exists from C(t) alone; k_ER and K are only
+# jointly identifiable (the implemented dC/dt = -k_ER*K*C is literally
+# Pseudo-first-order with an extra unidentifiable parameter). Kept fitted for
+# completeness/comparison only — never eligible for best-model selection.
+# Double-Exponential (4 params) and Elovich were previously excluded too, but
+# synthetic validation (see README) showed this was not statistically justified:
+# with 11-point curves at +/-3% noise, Elovich is recoverable at 45% (vs 0% when
+# excluded) at the cost of only ~5% false PSO->Elovich wins on noise-level close
+# calls, and Double-Exponential rarely wins anyway (AICc parsimony already
+# penalizes its 4 params).
+BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
+
+# TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
+# Its current formulation (dC/dt = -k_ER*K*C) is mathematically identical to
+# Pseudo-first-order with an extra unidentifiable parameter, so it provides no
+# information beyond Pseudo-first-order. Larger decision — not implemented.
+MODEL_NAMES = [
+    "Zero-order", "Pseudo-first", "Pseudo-second-order",
+    "Elovich", "L-H",
+    "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+]
+
+
+def _to_mol_L(value, unit, mw=None, rho_g_per_mL=None, ppms_volumetric=True):
+    """
+    Convert a concentration to mol/L.
+
+    FIX R — ppmS handling:
+      * ppms_volumetric=True  (default): ppmS is treated as mg(S)/L, i.e. the
+        sulfur mass per LITRE of fuel (standard lab preparation). No density is
+        applied. 250 ppmS -> 250/32.06/1000 = 7.798e-3 mol/L.
+      * ppms_volumetric=False: ppmS is treated as a true mass fraction mg(S)/kg
+        fuel, so the fuel density (g/mL == kg/L) is required to obtain mg/L.
+    """
+    unit = unit.strip()
+    if unit == "mol/L":
+        return value
+    elif unit == "mmol/L":
+        return value / 1000.0
+    elif unit in ("mg/L", "ppm"):
+        if mw is None:
+            raise ValueError("MW required for mg/L or ppm")
+        return (value / mw) / 1000.0
+    elif unit == "g/L":
+        if mw is None:
+            raise ValueError("MW required for g/L")
+        return value / mw
+    elif unit == "ppmS":
+        if ppms_volumetric:
+            # ppmS as mg(S)/L — volumetric lab prep, density NOT applied
+            c_mg_per_L = value
+        else:
+            # ppmS as true mass fraction mg(S)/kg fuel — density required
+            if rho_g_per_mL is None:
+                raise ValueError(
+                    "Fuel density rho (g/mL) is required for mass-based ppmS. "
+                    "Select a solvent / enter rho, or switch to volumetric ppmS."
+                )
+            c_mg_per_L = value * rho_g_per_mL
+        return (c_mg_per_L / MW_S) / 1000.0
+    else:
+        raise ValueError(f"Unknown unit: {unit}")
+
+
+# -- Kinetic model functions -------------------------------------
+def _zero_order(t, k, C0):
+    return np.maximum(C0 - k * t, 0)
+
+def _first_order(t, k, C0):
+    return C0 * np.exp(-k * t)
+
+def _second_order(t, k, C0):
+    return C0 / (1 + k * C0 * t)
+
+def _elovich(t, alpha, beta, C0):
+    return C0 - (1.0 / np.maximum(beta, 1e-15)) * np.log1p(
+        np.maximum(alpha * beta * t, 0))
+
+def _lh_model(t, k_LH, K_ads, C0):
+    t = np.asarray(t, dtype=float)
+    def dC(C, tt):
+        Cv = max(C[0], 0.0)
+        return [-k_LH * K_ads * Cv / (1.0 + K_ads * Cv)]
+    if t[0] == 0:
+        sol = odeint(dC, [C0], t, rtol=1e-6, atol=1e-9)
+        return np.maximum(sol.flatten(), 0.0)
+    t_full = np.concatenate(([0.0], t))
+    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
+    return np.maximum(sol.flatten()[1:], 0.0)
+
+# -- Additional Non-Linear Kinetic Models (v3.5.0) --------------
+def _power_law(t, k, n, C0):
+    """
+    Power-Law: -dC/dt = k*C^n  (integrated form).
+    v3.5.4: Correct branch for n>1 (exponent<0) — set C=0 when inside<=0
+    instead of raising to a negative power which gives +inf not 0.
+    """
+    t = np.asarray(t, dtype=float)
+    n = np.clip(n, 0.1, 5.0)
+    if abs(n - 1.0) < 1e-5:
+        return C0 * np.exp(-k * t)
+    exponent = 1.0 - n
+    inside = C0**exponent - k * exponent * t
+    if exponent > 0:   # n < 1: inside decreases toward 0, clip at 0
+        inside = np.maximum(inside, 0.0)
+        return inside ** (1.0 / exponent)
+    else:              # n > 1: reaction goes to completion when inside <= 0
+        C = np.zeros_like(inside)
+        mask = inside > 0
+        C[mask] = inside[mask] ** (1.0 / exponent)
+        return C
+
+def _power_law_t_half(C0, k, n):
+    """t½ for Power-Law. Returns NaN if not physically meaningful."""
+    try:
+        if abs(n - 1.0) < 1e-5:
+            return round(np.log(2) / k, 4)
+        # Analytical: t½ = [C0^(1-n) * (1 - 0.5^(1-n))] / [k*(1-n)]
+        # equivalent to original formula; valid for all n != 1
+        exponent = 1.0 - n
+        t_half = C0**exponent * (1.0 - 0.5**exponent) / (k * exponent)
+        if t_half > 0:
+            return round(t_half, 4)
+        return float("nan")
+    except Exception:
+        return float("nan")
+
+def _eley_rideal(t, k_er, K, C0):
+    """Eley-Rideal: one species adsorbed, other reacts from bulk phase"""
+    t = np.asarray(t, dtype=float)
+    def dC(C, tt):
+        Cv = max(float(C[0]), 1e-12)
+        return [-k_er * K * Cv]
+    t_full = np.concatenate(([0.0], t))
+    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
+    return np.maximum(sol.flatten()[1:], 0.0)
+
+def _avrami(t, k_av, n_av, C0):
+    """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
+    t = np.asarray(t, dtype=float)
+    return C0 * np.exp(-k_av * t**n_av)
+
+def _double_exponential(t, k1, k2, A, C0):
+    """Double Exponential: fast + slow parallel decay"""
+    t = np.asarray(t, dtype=float)
+    return C0 * (A * np.exp(-k1 * t) + (1.0 - A) * np.exp(-k2 * t))
+
+# -- Statistical helpers -----------------------------------------
+def _r2(y_obs, y_pred):
+    ss_res = np.sum((y_obs - y_pred) ** 2)
+    ss_tot = np.sum((y_obs - np.mean(y_obs)) ** 2)
+    return round(1 - ss_res / ss_tot if ss_tot > 0 else 0.0, 4)
+
+def _adj_r2(r2, n, p):
+    if n <= p + 1:
+        return float("nan")
+    return round(1 - (1 - r2) * (n - 1) / (n - p - 1), 4)
+
+def _aic(y_obs, y_pred, p):
+    n = len(y_obs)
+    rss = np.sum((y_obs - y_pred) ** 2)
+    if rss <= 0 or n == 0:
+        return float("inf")
+    return round(n * np.log(rss / n) + 2 * p, 4)
+
+def _aicc(y_obs, y_pred, p):
+    """
+    FIX S: small-sample corrected AIC. With few data points the plain AIC
+    penalty (2p) is too weak and over-parameterised models win spuriously.
+    AICc = AIC + 2p(p+1)/(n-p-1). Returns inf when n - p - 1 <= 0, which
+    flags the model as unsuitable for the available number of points.
+    """
+    n = len(y_obs)
+    aic = _aic(y_obs, y_pred, p)
+    if np.isinf(aic):
+        return float("inf")
+    denom = n - p - 1
+    if denom <= 0:
+        return float("inf")
+    return round(aic + (2.0 * p * (p + 1)) / denom, 4)
+
+
+# -- t1/2 helpers -------------------------------------------------
+def _elovich_t_half(C0, alpha, beta):
+    try:
+        if alpha <= 0 or beta <= 0 or C0 <= 0:
+            return float("nan")
+        exponent = C0 * beta / 2.0
+        if exponent > 700:
+            return float("inf")
+        val = np.exp(exponent) - 1.0
+        if val <= 0:
+            return float("nan")
+        return val / (alpha * beta)
+    except Exception:
+        return float("nan")
+
+def _lh_t_half(C0, k_LH, K_ads):
+    """
+    FIX A: Exact analytical t1/2 for Langmuir-Hinshelwood.
+    t1/2 = ln(2)/(kLH*K) + C0/(2*kLH)
+    """
+    try:
+        if k_LH <= 0 or K_ads <= 0 or C0 <= 0:
+            return float("nan")
+        t_half = (np.log(2) / (k_LH * K_ads)) + (C0 / (2.0 * k_LH))
+        return round(t_half, 4)
+    except Exception:
+        return float("nan")
+
+
+# -- Formatting helpers ------------------------------------------
+def _fmt_sci(val):
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "N/A"
+    if val == 0:
+        return "0"
+    if np.isinf(val):
+        return "∞"
+    exp  = int(np.floor(np.log10(abs(val))))
+    coef = val / (10 ** exp)
+    sup  = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    return f"{coef:.2f} × 10{str(exp).translate(sup)}"
+
+def _fmt_thalf(val):
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "N/A"
+    if np.isinf(val):
+        return "≫ range"
+    if val > 1e5:
+        return _fmt_sci(val)
+    return f"{val:.2f}"
+
+def _fmt_pm(val, se):
+    if val is None or se is None:
+        return _fmt_sci(val)
+    if np.isnan(val) or np.isnan(se):
+        return _fmt_sci(val)
+    if np.isinf(se) or se > abs(val) * 100:
+        return f"{_fmt_sci(val)} (SE large)"
+    exp   = int(np.floor(np.log10(abs(val)))) if val != 0 else 0
+    scale = 10 ** exp
+    sup   = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    return f"({val/scale:.2f} ± {se/scale:.2f}) × 10{str(exp).translate(sup)}"
+
+
+# -- Non-linear fitting engine -----------------------------------
+def _fit_nonlinear(time, Ct, C0):
+    t  = np.asarray(time, dtype=float)
+    Ct = np.asarray(Ct,   dtype=float)
+    n  = len(t)
+    results = {}
+
+    # Zero-order
+    try:
+        p, pcov = curve_fit(lambda t_, k: _zero_order(t_, k, C0), t, Ct,
+                            p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000)
+        se = np.sqrt(np.diag(pcov)); k0 = p[0]
+        pred = _zero_order(t, k0, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Zero-order"]
+        results["Zero-order"] = {
+            "params": (k0, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+            "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
+            "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)", "r0": k0, "r0_se": se[0],
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Pseudo-first-order
+    try:
+        p, pcov = curve_fit(lambda t_, k: _first_order(t_, k, C0), t, Ct,
+                            p0=[0.01], bounds=([0], [np.inf]), maxfev=5000)
+        se = np.sqrt(np.diag(pcov)); kapp = p[0]
+        pred = _first_order(t, kapp, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Pseudo-first"]
+        r0 = kapp * C0
+        results["Pseudo-first"] = {
+            "params": (kapp, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
+            "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
+            "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)", "r0": r0, "r0_se": se[0] * C0,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Pseudo-second-order  (FIX T: concentration-based, k2 in L/mol/min)
+    try:
+        p, pcov = curve_fit(lambda t_, k: _second_order(t_, k, C0), t, Ct,
+                            p0=[1.0], bounds=([0], [np.inf]), maxfev=5000)
+        se = np.sqrt(np.diag(pcov)); k2 = p[0]
+        pred = _second_order(t, k2, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Pseudo-second-order"]
+        r0 = k2 * C0 ** 2
+        results["Pseudo-second-order"] = {
+            "params": (k2, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+            "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
+            "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)", "r0": r0, "r0_se": se[0] * C0 ** 2,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Elovich
+    try:
+        p, pcov = curve_fit(lambda t_, a, b: _elovich(t_, a, b, C0), t, Ct,
+                            p0=[1e-4, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); alpha = p[0]; beta = p[1]
+        pred = _elovich(t, alpha, beta, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Elovich"]
+        results["Elovich"] = {
+            "params": (alpha, beta, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
+            "t_half": _elovich_t_half(C0, alpha, beta),
+            "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)", "r0": alpha, "r0_se": se[0],
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Langmuir-Hinshelwood
+    try:
+        p, pcov = curve_fit(lambda t_, kLH, Kads: _lh_model(t_, kLH, Kads, C0), t, Ct,
+                            p0=[0.01, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); k_LH = p[0]; K_ads = p[1]
+        pred = _lh_model(t, k_LH, K_ads, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["L-H"]
+        r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
+        _kc = K_ads * C0
+        _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
+        results["L-H"] = {
+            "params": (k_LH, K_ads, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
+            "t_half": _lh_t_half(C0, k_LH, K_ads),
+            "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)", "r0": r0, "r0_se": None,
+            "K_ads": K_ads, "K_se": se[1], "regime": _regime,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Power-Law (General Reaction Order)
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, n_: _power_law(t_, k, n_, C0),
+            t, Ct, p0=[0.01, 1.5],
+            bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); k_pl, n_pl = p
+        pred = _power_law(t, k_pl, n_pl, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Power-Law"]
+        r0 = k_pl * (C0 ** n_pl)
+        results["Power-Law"] = {
+            "params": (k_pl, n_pl, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
+            "t_half": _power_law_t_half(C0, k_pl, n_pl),
+            "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
+            "col_k": "k_PL", "r0": r0, "r0_se": None,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Eley-Rideal
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, K: _eley_rideal(t_, k, K, C0),
+            t, Ct, p0=[0.01, 10.0],
+            bounds=([0, 0], [np.inf, np.inf]), maxfev=8000)
+        se = np.sqrt(np.diag(pcov)); k_er, K_er = p
+        pred = _eley_rideal(t, k_er, K_er, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Eley-Rideal"]
+        r0 = k_er * K_er * C0
+        results["Eley-Rideal"] = {
+            "params": (k_er, K_er, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
+            "t_half": float("nan"),
+            "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
+            "col_k": "k_ER", "r0": r0, "r0_se": None,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Avrami
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k, n_: _avrami(t_, k, n_, C0),
+            t, Ct, p0=[0.01, 1.0],
+            bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000)
+        se = np.sqrt(np.diag(pcov)); k_av, n_av = p
+        pred = _avrami(t, k_av, n_av, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Avrami"]
+        results["Avrami"] = {
+            "params": (k_av, n_av, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
+            "t_half": float("nan"),
+            "k": k_av, "k_se": se[0],
+            "col_k": "k_Avrami", "r0": None, "r0_se": None,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Double Exponential
+    try:
+        p, pcov = curve_fit(
+            lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
+            t, Ct, p0=[0.1, 0.01, 0.6],
+            bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000)
+        se = np.sqrt(np.diag(pcov)); k1, k2, A_frac = p
+        pred = _double_exponential(t, k1, k2, A_frac, C0)
+        r2v = _r2(Ct, pred); np_ = N_PARAMS["Double-Exponential"]
+        results["Double-Exponential"] = {
+            "params": (k1, k2, A_frac, C0), "R2": r2v, "pred": pred,
+            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+            "aicc": _aicc(Ct, pred, np_),
+            "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
+            "t_half": float("nan"),
+            "k": k1, "k_se": se[0],
+            "col_k": "k1 (fast)", "r0": None, "r0_se": None,
+        }
+    except (RuntimeError, ValueError) as e:
+        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+    except Exception as e:
+        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    return results
+
+
+def _get_valid_models(res, model_names):
+    return {m: res[m] for m in model_names if res[m].get("converged", True)}
+
+def _best_model(res, model_names):
+    """
+    Best model selection for ODS kinetics with small datasets (~5 points).
+
+    Rules (in order):
+    1. Exclude models in BEST_MODEL_EXCLUDE or with non-finite AICc.
+    2. Find model with lowest AICc (best_aicc).
+    3. Parsimony window (DELTA=2.5): collect all models within 2.5 AICc units
+       of best_aicc — these are statistically indistinguishable.
+    4. Within the competitive set:
+       a. If Pseudo-second-order is present AND its R² >= (best R² - 0.01),
+          return it — physically most meaningful for ODS heterogeneous catalysis.
+       b. Otherwise return the model with fewest parameters (then lowest AICc).
+    """
+    valid = _get_valid_models(res, model_names)
+    candidates = {m: r for m, r in valid.items()
+                  if m not in BEST_MODEL_EXCLUDE
+                  and np.isfinite(r.get("aicc", float("inf")))}
+    if not candidates:
+        return None
+
+    # Step 1: find lowest AICc
+    best_aicc_val = min(r["aicc"] for r in candidates.values())
+
+    # Step 2: competitive window
+    DELTA = 2.5
+    competitive = {m: r for m, r in candidates.items()
+                   if r["aicc"] - best_aicc_val <= DELTA}
+
+    # Step 3: prefer Pseudo-second-order if competitive and R² close to best
+    if "Pseudo-second-order" in competitive:
+        pso_r2      = competitive["Pseudo-second-order"].get("R2", 0)
+        best_r2     = max(r.get("R2", 0) for r in competitive.values())
+        if pso_r2 >= best_r2 - 0.01:
+            return "Pseudo-second-order"
+
+    # Step 4: parsimony — fewest parameters, then lowest AICc
+    return min(competitive,
+               key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
+
+
+def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
+    """
+    Simonin (2016) fractional-uptake cutoff for auto-saturation exclusion.
+
+    Exclude any data point whose removal/conversion exceeds
+    max_fractional_uptake * (final/equilibrium removal value). Because removal is
+    monotonically increasing in time, this drops the near-equilibrium plateau tail
+    (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation), which
+    carries no rate-constant information. Default 1.0 disables the rule: internal
+    validation against the full 9-model portfolio showed the cutoff increases false
+    PSO selection and degrades mechanistic-model recovery (see README).
+
+    Returns (excluded_time_points, t_keep, rem_keep).
+    """
+    t_keep   = np.asarray(t_raw, dtype=float).copy()
+    rem_keep = np.asarray(rem_raw, dtype=float).copy()
+    excluded = []
+    if len(rem_keep) >= 3:
+        eq_rem = rem_keep[-1]  # final / equilibrium removal (%)
+        cutoff = max_fractional_uptake * eq_rem
+        while len(rem_keep) >= 3 and rem_keep[-1] > cutoff:
+            excluded.append(int(t_keep[-1]))
+            t_keep   = t_keep[:-1]
+            rem_keep = rem_keep[:-1]
+    return excluded, t_keep, rem_keep
