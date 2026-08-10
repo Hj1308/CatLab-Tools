@@ -30,6 +30,12 @@ Read-only review of `app_ods.py`, `catlab/catalyst_analytics.py`, `catlab/ods_ki
    `_zero_order`/`_first_order`/`_second_order` exist in `app_ods.py:238/241/244` and are
    re-derived inline in `ods_kinetics.py:78-93` and `catalyst_analytics.py:144-164`.
    Severity: **medium**. Fix: shared rate-law library in `catlab/kinetics_models.py`.
+   *Correction (verified via synthetic second-order data with known k and C0):* the
+   second-order fit in `catalyst_analytics.py` (`y = 1/C` with a free intercept) and
+   `ods_kinetics.py` (`y = 1/C - 1/C0`) use different conventions but are mathematically
+   equivalent — `linregress` estimates the intercept freely, so the slope k is unaffected
+   by the missing `1/C0` term. The real divergence is units/rounding only
+   (mmol/L·h vs mol/L·min), not a math error.
 
 4. **`MW_S = 32.06` hardcoded in three places** — `catlab/catalyst_analytics.py:27`,
    `catlab/ods_kinetics.py:22`, `app_ods.py:137`. Severity: **low**. Fix: single constant.
