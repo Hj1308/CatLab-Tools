@@ -22,3 +22,7 @@ Thumbs.db
 # Local env files
 .env
 .env.*
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
