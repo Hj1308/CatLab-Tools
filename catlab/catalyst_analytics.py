@@ -143,7 +143,7 @@ class KineticsAnalyser:
 
     def fit_zero_order(self) -> dict:
         r = self._nonlinear.get("Zero-order", {})
-        if not r.get("converged", False):
+        if r.get("converged") is False:
             return {"model": "Zero-order", "k (mmol/L/h)": 0.0, "R2": 0.0}
         return {"model": "Zero-order",
                 "k (mmol/L/h)": round(float(r.get("k", 0.0)), 5),
@@ -151,7 +151,7 @@ class KineticsAnalyser:
 
     def fit_first_order(self) -> dict:
         r = self._nonlinear.get("Pseudo-first", {})
-        if not r.get("converged", False):
+        if r.get("converged") is False:
             return {"model": "First-order", "k (h\u207b\u00b9)": 0.0, "R2": 0.0}
         return {"model": "First-order",
                 "k (h\u207b\u00b9)": round(float(r.get("k", 0.0)), 5),
@@ -159,7 +159,7 @@ class KineticsAnalyser:
 
     def fit_second_order(self) -> dict:
         r = self._nonlinear.get("Pseudo-second-order", {})
-        if not r.get("converged", False):
+        if r.get("converged") is False:
             return {"model": "Second-order", "k (L/mmol/h)": 0.0, "R2": 0.0}
         return {"model": "Second-order",
                 "k (L/mmol/h)": round(float(r.get("k", 0.0)), 5),

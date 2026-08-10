@@ -46,6 +46,58 @@ class TestKinetics:
     def test_tof_positive(self):    assert self.an.full_report()["TOF (h\u207b\xb9)"] > 0
     def test_profile_len(self):     assert len(self.an.conversion_profile()) == 7
 
+    def test_fit_methods_return_real_values_for_good_data(self):
+        """Regression for AUD-5: converged-guard must not silently zero-out
+        successful fits.  PFO synthetic data — all three nonlinear models
+        should return k>0 and R2>0.9."""
+        C0 = 15.59
+        t = np.array([0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
+        Ct = C0 * np.exp(-0.3 * t)
+        info = SampleInfo("Cat", "desulfurization", 0.05, 0.05, C0, "mmol/L",
+                          active_sites_mmol_g=0.32)
+        ka = KineticsAnalyser(t, Ct, info)
+        z = ka.fit_zero_order()
+        f = ka.fit_first_order()
+        s = ka.fit_second_order()
+        assert z["R2"] > 0.8, f"zero-order R2={z['R2']} — should recover"
+        assert z["k (mmol/L/h)"] > 0
+        assert f["R2"] > 0.9, f"first-order R2={f['R2']} — should recover"
+        assert f["k (h\u207b\u00b9)"] > 0
+        assert s["R2"] > 0.8, f"second-order R2={s['R2']} — should recover"
+        assert s["k (L/mmol/h)"] > 0
+
+    def test_converged_false_triggers_zero_return(self, monkeypatch):
+        """AUD-5 regression: explicit converged=False must cause k=0,R2=0."""
+        info = SampleInfo("x", "desulfurization", 0.05, 0.05, 15.59, "mmol/L")
+        ka = KineticsAnalyser(np.array([0.0, 1.0]), np.array([15.59, 10.0]), info)
+        fake = {"Zero-order": {"converged": False},
+                "Pseudo-first": {"converged": False},
+                "Pseudo-second-order": {"converged": False}}
+        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear",
+                            lambda *a, **kw: fake)
+        ka = KineticsAnalyser(np.array([0.0, 1.0]), np.array([15.59, 10.0]), info)
+        assert ka.fit_zero_order()["k (mmol/L/h)"] == 0.0
+        assert ka.fit_zero_order()["R2"] == 0.0
+        assert ka.fit_first_order()["k (h\u207b\u00b9)"] == 0.0
+        assert ka.fit_first_order()["R2"] == 0.0
+        assert ka.fit_second_order()["k (L/mmol/h)"] == 0.0
+        assert ka.fit_second_order()["R2"] == 0.0
+
+
+class TestConvergedContract:
+    """The engine sets converged=False on failure and omits the key on success.
+    All callers must interpret a missing key as a successful fit."""
+
+    def test_engine_get_valid_models_defaults_to_true(self):
+        from catlab.kinetics_engine import _get_valid_models
+        ok = {"Pseudo-first": {"R2": 0.99, "aicc": 5.0}}
+        assert "Pseudo-first" in _get_valid_models(ok, ["Pseudo-first"])
+
+    def test_engine_get_valid_models_rejects_false(self):
+        from catlab.kinetics_engine import _get_valid_models
+        bad = {"Pseudo-first": {"R2": 0.99, "aicc": 5.0, "converged": False}}
+        assert "Pseudo-first" not in _get_valid_models(bad, ["Pseudo-first"])
+
 class TestHelpers:
     def test_conversion(self):   assert calc_conversion(100.0, 10.0) == 90.0
     def test_tof(self):          assert abs(calc_tof(1.0, 0.05, 0.32, 6.0) - 1.0/(0.016*6)) < 0.01
