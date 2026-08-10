@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from dataclasses import dataclass
 from typing import Optional
+from .kinetics_engine import _fit_nonlinear
 
 # ─────────────────────────────────────────
 # CONSTANTS
@@ -137,30 +138,48 @@ class KineticsAnalyser:
         self.c    = np.array(concentration, dtype=float)
         self.info = sample_info
         self.c0   = self.c[0]
+        self._nl  = None   # lazy cache for _fit_nonlinear result
+
+    @property
+    def _nonlinear(self):
+        if self._nl is None:
+            self._nl = _fit_nonlinear(self.t, self.c, self.c0)
+        return self._nl
 
     def conversion_profile(self) -> np.ndarray:
         return np.array([calc_conversion(self.c0, ct) for ct in self.c])
 
     def fit_zero_order(self) -> dict:
-        slope, _, r, *_ = linregress(self.t, self.c)
-        return {"model": "Zero-order", "k (mmol/L/h)": round(-slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Zero-order", {})
+        if not r.get("converged", False):
+            return {"model": "Zero-order", "k (mmol/L/h)": 0.0, "R2": 0.0}
+        return {"model": "Zero-order",
+                "k (mmol/L/h)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_first_order(self) -> dict:
-        y = np.log(self.c / self.c0)
-        slope, _, r, *_ = linregress(self.t, y)
-        return {"model": "First-order", "k (h⁻¹)": round(-slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Pseudo-first", {})
+        if not r.get("converged", False):
+            return {"model": "First-order", "k (h\u207b\u00b9)": 0.0, "R2": 0.0}
+        return {"model": "First-order",
+                "k (h\u207b\u00b9)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_second_order(self) -> dict:
-        y = 1.0 / self.c
-        slope, _, r, *_ = linregress(self.t, y)
-        return {"model": "Second-order", "k (L/mmol/h)": round(slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Pseudo-second-order", {})
+        if not r.get("converged", False):
+            return {"model": "Second-order", "k (L/mmol/h)": 0.0, "R2": 0.0}
+        return {"model": "Second-order",
+                "k (L/mmol/h)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_pseudo_first_order(self) -> dict:
+        # Lagergren adsorption model — no engine equivalent, stays linearized
         qe_est = self.c[0] - self.c[-1]
         qt     = self.c[0] - self.c
         y      = np.log(np.clip(qe_est - qt, 1e-12, None))
         slope, intercept, r, *_ = linregress(self.t[:-1], y[:-1])
-        return {"model": "Pseudo-first-order", "k1 (h⁻¹)": round(-slope, 5),
+        return {"model": "Pseudo-first-order", "k1 (h\u207b\u00b9)": round(-slope, 5),
                 "qe (mmol/g)": round(np.exp(intercept), 5), "R2": round(r**2, 5)}
 
     def best_fit(self) -> dict:
