@@ -703,16 +703,17 @@ def _best_model(res, model_names):
                key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
 
 
-def _auto_saturation_exclusions(t_raw, rem_raw,
-                                sat_thresh_1=8.0, sat_thresh_2=15.0):
+def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     """
-    Determine which raw points the auto-saturation rule drops.
+    Simonin (2016) fractional-uptake cutoff for auto-saturation exclusion.
 
-    Layer 1: if the last removal increment < sat_thresh_1, drop the last point.
-    Layer 2: then, unconditionally (even if Layer 1 removed nothing), if the last
-             increment < sat_thresh_2, drop the (new) last point. Because Layer 2
-             always tests the last interval, a final increment in
-             [sat_thresh_1, sat_thresh_2) still costs one data point.
+    Exclude any data point whose removal/conversion exceeds
+    max_fractional_uptake * (final/equilibrium removal value). Because removal is
+    monotonically increasing in time, this drops the near-equilibrium plateau tail
+    (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation), which
+    carries no rate-constant information. Default 1.0 disables the rule: internal
+    validation against the full 9-model portfolio showed the cutoff increases false
+    PSO selection and degrades mechanistic-model recovery (see README).
 
     Returns (excluded_time_points, t_keep, rem_keep).
     """
@@ -720,11 +721,9 @@ def _auto_saturation_exclusions(t_raw, rem_raw,
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
     if len(rem_keep) >= 3:
-        if (rem_keep[-1] - rem_keep[-2]) < sat_thresh_1:
-            excluded.append(int(t_keep[-1]))
-            t_keep   = t_keep[:-1]
-            rem_keep = rem_keep[:-1]
-        if len(rem_keep) >= 3 and (rem_keep[-1] - rem_keep[-2]) < sat_thresh_2:
+        eq_rem = rem_keep[-1]  # final / equilibrium removal (%)
+        cutoff = max_fractional_uptake * eq_rem
+        while len(rem_keep) >= 3 and rem_keep[-1] > cutoff:
             excluded.append(int(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
@@ -1068,9 +1067,20 @@ def _tab_kinetics(cfg, uploaded):
     t_pre_per_cat     = {}
     rem_pre_per_cat   = {}
 
-    # Auto-saturation thresholds (exact semantics in _auto_saturation_exclusions)
-    SAT_THRESH_1 = 8.0   # Layer 1: last interval < 8% → drop last point
-    SAT_THRESH_2 = 15.0  # Layer 2: last interval < 15% → drop last point (also fires when Layer 1 did not remove)
+    # Auto-saturation: user-adjustable Simonin (2016) fractional-uptake cutoff.
+    # Points whose removal exceeds max_fractional_uptake × final removal are
+    # excluded before fitting (see _auto_saturation_exclusions).
+    max_frac = st.slider(
+        "🛑 Max fractional uptake for auto-saturation (0.80–1.0)",
+        min_value=0.80, max_value=1.0, value=1.0, step=0.01,
+        help="Simonin (2016) fractional-uptake cutoff: exclude any point whose "
+             "removal exceeds this fraction of the final/equilibrium removal value "
+             "(Simonin's original recommendation: 0.85). Default 1.0 = disabled — "
+             "internal validation against the full 9-model portfolio showed the "
+             "cutoff increases false PSO selection and degrades mechanistic-model "
+             "recovery, so only lower it for pure PFO/PSO adsorption studies.")
+    if max_frac >= 1.0:
+        st.info("ℹ️ max fractional uptake = 1.0 disables auto-saturation exclusion (default).")
 
     for col in removal_cols:
         removal_raw = df[col].dropna().values[:len(t_raw)].astype(float)
@@ -1084,14 +1094,13 @@ def _tab_kinetics(cfg, uploaded):
         rem_pre_excl = rem_keep.copy()
 
         # ── Auto-saturation detection (only when no manual exclusion) ──
-        # Semantics (verified on data, see _auto_saturation_exclusions): Layer 1
-        # drops the last point when its increment < SAT_THRESH_1; Layer 2 then tests
-        # the LAST interval again against SAT_THRESH_2 and drops the last point even
-        # if Layer 1 removed nothing — so a final increment in [SAT_THRESH_1,
-        # SAT_THRESH_2) still costs the last data point.
+        # Semantics (verified on data, see _auto_saturation_exclusions): any point
+        # whose removal exceeds max_fractional_uptake × (final removal) is dropped.
+        # Default 1.0 disables the rule; see README for the validation that led to
+        # disabling it (the cutoff increases false-PSO and hurts mechanistic models).
         if not excl_times:
             auto_excl, t_keep, rem_keep = _auto_saturation_exclusions(
-                t_keep, rem_keep, SAT_THRESH_1, SAT_THRESH_2)
+                t_keep, rem_keep, max_frac)
         else:
             auto_excl = []
 
@@ -1103,8 +1112,8 @@ def _tab_kinetics(cfg, uploaded):
             cat_label = col.replace(" Removal (%)","").strip()
             st.info(
                 f"ℹ️ **{cat_label}**: auto-excluded saturation point(s) "
-                f"t = {auto_excl} min (removal increment < {SAT_THRESH_1}%/"
-                f"{SAT_THRESH_2}%). Use manual exclusion above to override.")
+                f"t = {auto_excl} min (removal exceeds {max_frac:.0%} of final "
+                f"removal, Simonin 2016 cutoff). Use manual exclusion above to override.")
 
         Ct_keep = C0 * (1 - rem_keep / 100.0)
 
@@ -1339,8 +1348,9 @@ def _tab_kinetics(cfg, uploaded):
     else:
         with st.expander("🔎 Auto-saturation details", expanded=True):
             st.caption(
-                "Points dropped by the auto-saturation rule (last-interval increment "
-                f"< {SAT_THRESH_1}% then < {SAT_THRESH_2}%), and the best-model result "
+                f"Points dropped by the auto-saturation rule (removal > "
+                f"{max_frac:.0%} of final/equilibrium removal, Simonin 2016 "
+                "fractional-uptake cutoff), and the best-model result "
                 "with vs without that exclusion. Best model = AICc selection, R² shown.")
             det_rows = []
             for col in all_results:

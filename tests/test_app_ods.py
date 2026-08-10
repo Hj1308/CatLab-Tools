@@ -64,9 +64,11 @@ class TestNonConvergedSentinelHandling:
 
 
 class TestAutoSaturationDetection:
-    """Regression: case #1 — Layer 2 fires on the last point (increment in
-    [8, 15)) even though Layer 1 does not, and the exclusion flips the AICc
-    best-model choice from L-H to Power-Law."""
+    """Regression: Simonin (2016) fractional-uptake cutoff. Case #1 — final
+    removal 91% → cutoff 77.35% at 0.85; every point above the cutoff (80, 91) is
+    dropped, not just the last one (the old increment-based rule dropped only the
+    final point here). Default max_fractional_uptake is 1.0 (disabled); tests pass
+    0.85 explicitly to exercise the cutoff."""
 
     T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
     REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 91.0])
@@ -78,19 +80,48 @@ class TestAutoSaturationDetection:
         best = app_ods._best_model(res, app_ods.MODEL_NAMES)
         return best, res[best]["R2"] if best else None
 
-    def test_excludes_only_last_point(self):
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
+    def test_excludes_all_points_above_cutoff(self):
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+            self.T, self.REM, max_fractional_uptake=0.85)
+        assert excl == [6, 4]
+        assert t_keep.tolist() == [0.0, 0.5, 1.0, 2.0, 3.0]
+        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0]
+
+    def test_cutoff_scales_with_final_removal(self):
+        # final = 80 → cutoff 68.0 at 0.85; only the point above it (80) drops.
+        rem2 = np.array([0.0, 12.0, 25.0, 40.0, 55.0, 68.0, 80.0])
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+            self.T, rem2, max_fractional_uptake=0.85)
         assert excl == [6]
-        assert t_keep.tolist() == [0.0, 0.5, 1.0, 2.0, 3.0, 4.0]
-        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0, 80.0]
+        assert rem_keep.tolist() == [0.0, 12.0, 25.0, 40.0, 55.0, 68.0]
+
+    def test_lower_cutoff_drops_more_points(self):
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+            self.T, self.REM, max_fractional_uptake=0.5)
+        # cutoff = 45.5 → 50, 68, 80, 91 all dropped
+        assert excl == [6, 4, 3, 2]
+        assert t_keep.tolist() == [0.0, 0.5, 1.0]
+        assert rem_keep.tolist() == [0.0, 16.0, 30.0]
+
+    def test_max_frac_1_0_disables(self):
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+            self.T, self.REM, max_fractional_uptake=1.0)
+        assert excl == []
+        assert t_keep.tolist() == self.T.tolist()
+
+    def test_default_1_0_disables(self):
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
+        assert excl == []
+        assert t_keep.tolist() == self.T.tolist()
 
     def test_best_model_flips_without_vs_with_exclusion(self):
         c0 = 500.0 / 32.06 / 1000.0
         best_before, _ = self._best(self.T, self.REM, c0)
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
-        assert excl == [6]
+        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+            self.T, self.REM, max_fractional_uptake=0.85)
+        assert excl == [6, 4]
         best_after, _ = self._best(t_keep, rem_keep, c0)
 
         assert best_before == "L-H"
-        assert best_after == "Power-Law"
+        assert best_after == "Pseudo-first"
         assert best_before != best_after
