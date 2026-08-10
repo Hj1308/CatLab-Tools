@@ -41,12 +41,13 @@ jobs:
         run: |
           # Stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Exit-zero treats all errors as warnings (max line length 120)
+          # TODO: remove --exit-zero after style cleanup (632 known violations)
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
-      - name: Run tests with pytest
+      - name: Run tests with coverage
         run: |
-          pytest tests/ -v --cov=catlab --cov-report=xml --cov-report=term-missing
+          # TODO: add --cov-fail-under=70 once coverage reaches target
+          pytest tests/ -v --cov=catlab --cov=app_ods --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5.4.3
