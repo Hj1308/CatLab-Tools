@@ -125,3 +125,47 @@ class TestAutoSaturationDetection:
         assert best_before == "L-H"
         assert best_after == "Pseudo-first"
         assert best_before != best_after
+
+
+class TestEdgeCaseModels:
+    """Defensive coverage: Power-Law n>1 and L-H with t[0]!=0 already work;
+    these tests lock in the behavior to prevent regressions."""
+
+    C0 = 500.0 / 32.06 / 1000.0  # ~0.01559 mol/L
+    T  = np.array([0, 10, 20, 40, 60, 90, 120, 180, 240, 300.0])
+
+    def test_power_law_n_gt_1_fits_and_produces_valid_curve(self):
+        """Power-Law with n=2.0 converges, yields high R², and reproduces
+        the synthetic signal well.  Individual k/n parameters are *not*
+        asserted — they are highly covariant for n>1 and multiple (k,n)
+        pairs give the same curve."""
+        n_true, k_true = 2.0, 0.001
+        Ct_clean = app_ods._power_law(self.T, k_true, n_true, self.C0)
+        res = app_ods._fit_nonlinear(self.T, Ct_clean, self.C0)
+        pl = res["Power-Law"]
+        assert pl["R2"] > 0.99
+        assert 0.1 < pl["n_pl"] < 5.0
+        assert pl.get("k") is not None
+        assert pl.get("k") > 0
+        # predicted curve within 5 % of true signal (relative to C0)
+        pred = np.asarray(pl["pred"])
+        assert np.max(np.abs(pred - Ct_clean)) / self.C0 < 0.05
+
+    def test_lh_model_with_nonzero_t0_recovers_parameters(self):
+        """L-H integration from t[0]=5 (not zero) — the ODE solver prepends
+        t=0 with C(0)=C0 and correctly returns values at the original times."""
+        k_true, K_true = 0.01, 15.0
+        T_shift = np.array([5, 15, 30, 45, 60, 90, 120, 180.0])
+        Ct_clean = app_ods._lh_model(T_shift, k_true, K_true, self.C0)
+        # confirm signal decays from the shifted start
+        assert Ct_clean[0] < self.C0
+        # verify t=0 prepend hook: integrating from 0 gives same value at t=5
+        T_full = np.array([0.0, 5, 15, 30, 45, 60, 90, 120, 180.0])
+        Ct_full = app_ods._lh_model(T_full, k_true, K_true, self.C0)
+        assert abs(Ct_full[0] - self.C0) < 1e-12
+        assert abs(Ct_full[1] - Ct_clean[0]) < 1e-12
+        # fit on shifted data recovers parameters (L-H is well-posed)
+        res = app_ods._fit_nonlinear(T_shift, Ct_clean, self.C0)
+        lh = res["L-H"]
+        assert abs(lh["k"] - k_true) / k_true < 0.02
+        assert abs(lh["K_ads"] - K_true) / K_true < 0.02
