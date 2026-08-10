@@ -68,6 +68,26 @@ All models fitted by nonlinear least squares with C₀ locked.
 | Avrami | $C_t = C_0 \exp(-k t^n)$ | — | Phenomenological |
 | Double-Exponential | $C_t = C_0[A e^{-k_1 t} + (1-A)e^{-k_2 t}]$ | — | Phenomenological |
 
+> **Eley-Rideal is structurally redundant here.** This app measures only
+> single-species data (sulfur concentration vs time), and the surface-reaction
+> rate law is applied under **excess-oxidant** conditions (oxidant concentration
+> is constant and folded into the rate constant — the standard assumption for
+> liquid-phase ODS). Under that assumption the Eley-Rideal curve shape is
+> already spanned by two existing models:
+>
+> - **Low surface coverage** — the adsorption isotherm is linear,
+>   $\theta_A \approx K_A C_A$ (constant), giving $dC/dt = -k\,C$: mathematically
+>   **identical to Pseudo-first-order**.
+> - **General coverage** — $\theta_A = K_A C_A/(1 + K_A C_A)$ (constant), and the
+>   surface-reaction rate takes the rational form $C/(1+KC)$, i.e. exactly the
+>   **Langmuir-Hinshelwood** functional form implemented in this app.
+>
+> No distinguishing curve shape is therefore obtainable from $C(t)$ alone, and
+> the two fitted constants $k_{ER}$ and $K$ are only jointly identifiable (their
+> product equals the Pseudo-first-order rate constant). Eley-Rideal is **fit and
+> displayed for completeness/comparison only** (see the "All models" table) but is
+> **never eligible for automatic best-model selection** (`BEST_MODEL_EXCLUDE`).
+
 > **Auto-saturation detection:** Tab 1 offers a user-adjustable **fractional-uptake
 > cutoff** after Simonin (2016): any point whose removal exceeds a chosen fraction
 > of the final/equilibrium removal value is excluded before fitting. Simonin

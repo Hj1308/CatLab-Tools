@@ -150,12 +150,26 @@ N_PARAMS = {
     "Double-Exponential":  4,
 }
 
-# FIX S: models excluded from automatic "best model" selection.
-# Double-Exponential (4 params): near-certain overfitting with <10 points.
-# Elovich: chemisorption model — not mechanistically appropriate for ODS
-#          oxidation reactions; its 2-parameter flexibility causes spurious
-#          wins over pseudo-second-order on fast-saturation data.
-BEST_MODEL_EXCLUDE = {"Double-Exponential", "Elovich", "Eley-Rideal"}
+# Models excluded from automatic "best model" selection.
+# Eley-Rideal: structurally non-identifiable with this experiment type. Only
+# single-species data (sulfur concentration vs time) are available, and for the
+# surface-reaction rate law the oxidant is held in excess (constant concentration
+# folded into the rate constant), which is the standard assumption here. Under
+# excess oxidant the Eley-Rideal curve shape is spanned by existing models:
+#   - low surface coverage  : theta_A ~ K_A*C_A (const) -> dC/dt = -k*C  == Pseudo-first
+#   - general coverage      : theta_A ~ K_A*C_A/(1+K_A*C_A) (const) -> the rational
+#     C/(1+KC) term == the Langmuir-Hinshelwood functional form
+# So no distinguishing curve shape exists from C(t) alone; k_ER and K are only
+# jointly identifiable (the implemented dC/dt = -k_ER*K*C is literally
+# Pseudo-first-order with an extra unidentifiable parameter). Kept fitted for
+# completeness/comparison only — never eligible for best-model selection.
+# Double-Exponential (4 params) and Elovich were previously excluded too, but
+# synthetic validation (see README) showed this was not statistically justified:
+# with 11-point curves at +/-3% noise, Elovich is recoverable at 45% (vs 0% when
+# excluded) at the cost of only ~5% false PSO->Elovich wins on noise-level close
+# calls, and Double-Exponential rarely wins anyway (AICc parsimony already
+# penalizes its 4 params).
+BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
@@ -922,6 +936,10 @@ def _shared_uploader():
 
 
 # Master list of models used across fitting tabs
+# TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
+# Its current formulation (dC/dt = -k_ER*K*C) is mathematically identical to
+# Pseudo-first-order with an extra unidentifiable parameter, so it provides no
+# information beyond Pseudo-first-order. Larger decision — not implemented.
 MODEL_NAMES = [
     "Zero-order", "Pseudo-first", "Pseudo-second-order",
     "Elovich", "L-H",
@@ -1391,6 +1409,13 @@ def _tab_kinetics(cfg, uploaded):
             subrows = []
             for m in model_names:
                 mr = res[m]
+                note = ""
+                if m == "Eley-Rideal":
+                    note = ("⚠️ Fit for completeness/comparison only — structurally "
+                            "redundant with Pseudo-first-order (low coverage) or "
+                            "Langmuir-Hinshelwood (general coverage) under "
+                            "excess-oxidant conditions; never eligible for best-model "
+                            "selection. k_ER and K are not individually identifiable.")
                 if mr.get("converged", True):
                     subrows.append({
                         "Model":    m,
@@ -1400,11 +1425,12 @@ def _tab_kinetics(cfg, uploaded):
                         "AICc":     mr.get("aicc","N/A"),
                         "AIC":      mr.get("aic","N/A"),
                         "t½ (min)": _fmt_thalf(mr.get("t_half", float("nan"))),
+                        "Note":     note,
                     })
                 else:
                     subrows.append({"Model": m, "k (±SE)": "fit failed",
                                     "R²":"–","Adj-R²":"–","AICc":"–",
-                                    "AIC":"–","t½ (min)":"–"})
+                                    "AIC":"–","t½ (min)":"–", "Note": note})
             st.dataframe(pd.DataFrame(subrows), use_container_width=True)
 
     # ── Download ZIP ──────────────────────────────────────────────
