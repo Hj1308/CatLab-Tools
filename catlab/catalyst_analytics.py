@@ -43,12 +43,27 @@ class SampleInfo:
     c0_value             : float
     c0_unit              : str
     mw_pollutant         : Optional[float] = None
+    n_sulfur             : int = 1
     active_sites_mmol_g  : Optional[float] = None
     notes                : str = ""
 
     @property
     def c0_mmol_L(self) -> float:
-        return convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        """Compound concentration (mmol / L).  For ppmS inputs the raw
+        conversion returns *sulfur* mmol/L; divide by n_sulfur to recover the
+        compound basis."""
+        v = convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        if self.c0_unit == "ppmS":
+            v /= self.n_sulfur
+        return v
+
+    @property
+    def c0_S_mmol_L(self) -> float:
+        """Sulfur-atom concentration (mmol S / L)."""
+        v = convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        if self.c0_unit != "ppmS":
+            v *= self.n_sulfur
+        return v
     @property
     def catalyst_loading_g_L(self) -> float:
         return self.catalyst_mass_g / self.solution_vol_L

@@ -50,6 +50,15 @@ Read-only review of `app_ods.py`, `catlab/catalyst_analytics.py`, `catlab/ods_ki
 7. **C0 conversion duplicated** — `_C0_both()`/`_C0()` in `app_ods.py:227` vs
    `SampleInfo.c0_mmol_L` property in `catalyst_analytics.py:72`. Severity: **medium**.
    Fix: package-level converter consumed by both.
+   *Resolved (2026-08-10):* converters consolidated into `kinetics_engine` (Phase 4).
+   Additionally, `SampleInfo.c0_mmol_L` had a **bug** (not a refactor): for `ppmS`
+   inputs it returned sulfur-atom mmol/L instead of compound mmol/L, overstating
+   the concentration by a factor of `n_sulfur` for multi-sulfur substrates.
+   Fixed (Phase 5) by adding `n_sulfur: int = 1` to `SampleInfo` and correcting
+   `c0_mmol_L` to divide by `n_sulfur` for ppmS inputs.  A `c0_S_mmol_L` property
+   was also added for sulfur-basis access.  The KineticsAnalyser was unaffected
+   (it reads C0 from the data array, not from SampleInfo), so this only impacted
+   the summary table and `n0_mmol` calculations.
 
 8. **Template generators duplicated/diverged** — `generate_template()` in
    `catlab/ods_kinetics.py:45` (empty sheets) vs `create_advanced_template()` in

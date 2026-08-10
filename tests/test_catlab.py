@@ -27,6 +27,12 @@ class TestSampleInfo:
     def test_c0_mmol_L(self):      assert abs(self.info.c0_mmol_L - 500/32.06) < 1e-3
     def test_loading(self):        assert self.info.catalyst_loading_g_L == 1.0
     def test_n0(self):             assert abs(self.info.n0_mmol - self.info.c0_mmol_L*0.05) < 1e-6
+    def test_c0_mmol_L_multi_sulfur(self):
+        """c0_mmol_L corrects ppmS to compound basis for di-sulfur substrates."""
+        info2 = SampleInfo("Cat", "desulfurization", 0.05, 0.05, 500.0, "ppmS",
+                           n_sulfur=2)
+        assert abs(info2.c0_S_mmol_L - 500.0/32.06) < 1e-3
+        assert abs(info2.c0_mmol_L - 500.0/32.06/2) < 1e-3
 
 class TestKinetics:
     def setup_method(self):
