@@ -23,32 +23,9 @@ from typing import Optional
 from .kinetics_engine import _fit_nonlinear
 
 # ─────────────────────────────────────────
-# CONSTANTS
+# 1. UNIT CONVERTER (delegates to shared engine)
 # ─────────────────────────────────────────
-MW_S = 32.06   # molar mass of sulfur (g/mol)
-
-
-# ─────────────────────────────────────────
-# 1. UNIT CONVERTER
-# ─────────────────────────────────────────
-def convert_to_mmol_L(value: float, unit: str, mw: Optional[float] = None) -> float:
-    """
-    Convert concentration to mmol/L.
-    Supported units: mol/L, mmol/L, mg/L, ppm, g/L, ppmS
-    ppmS auto-converts using MW_S = 32.06 g/mol (sulfur).
-    """
-    unit = unit.strip()
-    if unit == "mol/L":       return value * 1000.0
-    elif unit == "mmol/L":    return value
-    elif unit in ("mg/L", "ppm"):
-        if mw is None: raise ValueError("MW (g/mol) required for mg/L or ppm.")
-        return value / mw
-    elif unit == "g/L":
-        if mw is None: raise ValueError("MW (g/mol) required for g/L.")
-        return (value * 1000.0) / mw
-    elif unit == "ppmS":      return value / MW_S
-    else: raise ValueError(f"Unknown unit: '{unit}'. Supported: mol/L, mmol/L, mg/L, ppm, g/L, ppmS")
-
+from .kinetics_engine import convert_to_mmol_L  # noqa: E402  (re-export for public API)
 
 # ─────────────────────────────────────────
 # 2. SAMPLE METADATA

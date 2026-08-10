@@ -95,6 +95,17 @@ def _to_mol_L(value, unit, mw=None, rho_g_per_mL=None, ppms_volumetric=True):
         raise ValueError(f"Unknown unit: {unit}")
 
 
+def convert_to_mmol_L(value, unit, mw=None):
+    """
+    Convert concentration to mmol/L.
+
+    Convenience wrapper around _to_mol_L that returns mmol/L instead of mol/L.
+    Supported units: mol/L, mmol/L, mg/L, ppm, g/L, ppmS.
+    ppmS auto-converts using MW_S = 32.06 g/mol (sulfur).
+    """
+    return _to_mol_L(value, unit, mw=mw) * 1000.0
+
+
 # -- Kinetic model functions -------------------------------------
 def _zero_order(t, k, C0):
     return np.maximum(C0 - k * t, 0)

@@ -17,26 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Optional
 import os
-from .kinetics_engine import _fit_nonlinear
-
-MW_S = 32.06   # g/mol sulfur
-
-
-# -------------------------------------------------
-# UNIT CONVERTER  ->  mol/L
-# -------------------------------------------------
-def _to_mol_L(value: float, unit: str, mw: Optional[float] = None) -> float:
-    unit = unit.strip()
-    if unit == "mol/L":    return value
-    elif unit == "mmol/L": return value / 1000.0
-    elif unit in ("mg/L", "ppm"):
-        if mw is None: raise ValueError("mw_pollutant required for mg/L or ppm")
-        return (value / mw) / 1000.0
-    elif unit == "g/L":
-        if mw is None: raise ValueError("mw_pollutant required for g/L")
-        return value / mw
-    elif unit == "ppmS":   return (value / MW_S) / 1000.0
-    else: raise ValueError(f"Unknown unit: {unit}")
+from .kinetics_engine import _fit_nonlinear, _to_mol_L
 
 
 # -------------------------------------------------
