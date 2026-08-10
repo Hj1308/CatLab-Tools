@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 from scipy.integrate import odeint
 
 # -- Constants ----------------------------------------------------
-MW_S   = 32.06   # g/mol
+MW_S = 32.06  # g/mol
 N_PARAMS = {
     "Zero-order":          1,
     "Pseudo-first":        1,
@@ -21,8 +21,8 @@ N_PARAMS = {
     "Avrami":              2,
     "Double-Exponential":  4,
 }
-COLORS  = ["#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
-MARKERS = ["o","s","^","D","v","P","*","X","h"]
+COLORS = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#17becf", "#bcbd22"]
+MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
 
 # Models excluded from automatic "best model" selection.
 # Eley-Rideal: structurally non-identifiable with this experiment type. Only
@@ -301,8 +301,11 @@ def _fit_nonlinear(time, Ct, C0):
     try:
         p, pcov = curve_fit(lambda t_, k: _zero_order(t_, k, C0), t, Ct,
                             p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov)); k0 = p[0]
-        pred = _zero_order(t, k0, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Zero-order"]
+        se = np.sqrt(np.diag(pcov))
+        k0 = p[0]
+        pred = _zero_order(t, k0, C0)
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Zero-order"]
         results["Zero-order"] = {
             "params": (k0, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
@@ -320,8 +323,11 @@ def _fit_nonlinear(time, Ct, C0):
     try:
         p, pcov = curve_fit(lambda t_, k: _first_order(t_, k, C0), t, Ct,
                             p0=[0.01], bounds=([0], [np.inf]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov)); kapp = p[0]
-        pred = _first_order(t, kapp, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Pseudo-first"]
+        se = np.sqrt(np.diag(pcov))
+        kapp = p[0]
+        pred = _first_order(t, kapp, C0)
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Pseudo-first"]
         r0 = kapp * C0
         results["Pseudo-first"] = {
             "params": (kapp, C0), "R2": r2v, "pred": pred,
@@ -340,8 +346,11 @@ def _fit_nonlinear(time, Ct, C0):
     try:
         p, pcov = curve_fit(lambda t_, k: _second_order(t_, k, C0), t, Ct,
                             p0=[1.0], bounds=([0], [np.inf]), maxfev=5000)
-        se = np.sqrt(np.diag(pcov)); k2 = p[0]
-        pred = _second_order(t, k2, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Pseudo-second-order"]
+        se = np.sqrt(np.diag(pcov))
+        k2 = p[0]
+        pred = _second_order(t, k2, C0)
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Pseudo-second-order"]
         r0 = k2 * C0 ** 2
         results["Pseudo-second-order"] = {
             "params": (k2, C0), "R2": r2v, "pred": pred,
@@ -360,8 +369,12 @@ def _fit_nonlinear(time, Ct, C0):
     try:
         p, pcov = curve_fit(lambda t_, a, b: _elovich(t_, a, b, C0), t, Ct,
                             p0=[1e-4, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
-        se = np.sqrt(np.diag(pcov)); alpha = p[0]; beta = p[1]
-        pred = _elovich(t, alpha, beta, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["Elovich"]
+        se = np.sqrt(np.diag(pcov))
+        alpha = p[0]
+        beta = p[1]
+        pred = _elovich(t, alpha, beta, C0)
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Elovich"]
         results["Elovich"] = {
             "params": (alpha, beta, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
@@ -379,8 +392,12 @@ def _fit_nonlinear(time, Ct, C0):
     try:
         p, pcov = curve_fit(lambda t_, kLH, Kads: _lh_model(t_, kLH, Kads, C0), t, Ct,
                             p0=[0.01, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
-        se = np.sqrt(np.diag(pcov)); k_LH = p[0]; K_ads = p[1]
-        pred = _lh_model(t, k_LH, K_ads, C0); r2v = _r2(Ct, pred); np_ = N_PARAMS["L-H"]
+        se = np.sqrt(np.diag(pcov))
+        k_LH = p[0]
+        K_ads = p[1]
+        pred = _lh_model(t, k_LH, K_ads, C0)
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["L-H"]
         r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
         _kc = K_ads * C0
         _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
@@ -404,9 +421,11 @@ def _fit_nonlinear(time, Ct, C0):
             lambda t_, k, n_: _power_law(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.5],
             bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000)
-        se = np.sqrt(np.diag(pcov)); k_pl, n_pl = p
+        se = np.sqrt(np.diag(pcov))
+        k_pl, n_pl = p
         pred = _power_law(t, k_pl, n_pl, C0)
-        r2v = _r2(Ct, pred); np_ = N_PARAMS["Power-Law"]
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Power-Law"]
         r0 = k_pl * (C0 ** n_pl)
         results["Power-Law"] = {
             "params": (k_pl, n_pl, C0), "R2": r2v, "pred": pred,
@@ -428,9 +447,11 @@ def _fit_nonlinear(time, Ct, C0):
             lambda t_, k, K: _eley_rideal(t_, k, K, C0),
             t, Ct, p0=[0.01, 10.0],
             bounds=([0, 0], [np.inf, np.inf]), maxfev=8000)
-        se = np.sqrt(np.diag(pcov)); k_er, K_er = p
+        se = np.sqrt(np.diag(pcov))
+        k_er, K_er = p
         pred = _eley_rideal(t, k_er, K_er, C0)
-        r2v = _r2(Ct, pred); np_ = N_PARAMS["Eley-Rideal"]
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Eley-Rideal"]
         r0 = k_er * K_er * C0
         results["Eley-Rideal"] = {
             "params": (k_er, K_er, C0), "R2": r2v, "pred": pred,
@@ -452,9 +473,11 @@ def _fit_nonlinear(time, Ct, C0):
             lambda t_, k, n_: _avrami(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.0],
             bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000)
-        se = np.sqrt(np.diag(pcov)); k_av, n_av = p
+        se = np.sqrt(np.diag(pcov))
+        k_av, n_av = p
         pred = _avrami(t, k_av, n_av, C0)
-        r2v = _r2(Ct, pred); np_ = N_PARAMS["Avrami"]
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Avrami"]
         results["Avrami"] = {
             "params": (k_av, n_av, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
@@ -475,9 +498,12 @@ def _fit_nonlinear(time, Ct, C0):
             lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
             t, Ct, p0=[0.1, 0.01, 0.6],
             bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000)
-        se = np.sqrt(np.diag(pcov)); k1, k2, A_frac = p
+        se = np.sqrt(np.diag(pcov))
+        k1, k2 = p[0], p[1]
+        A_frac = p[2]
         pred = _double_exponential(t, k1, k2, A_frac, C0)
-        r2v = _r2(Ct, pred); np_ = N_PARAMS["Double-Exponential"]
+        r2v = _r2(Ct, pred)
+        np_ = N_PARAMS["Double-Exponential"]
         results["Double-Exponential"] = {
             "params": (k1, k2, A_frac, C0), "R2": r2v, "pred": pred,
             "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
