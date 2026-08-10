@@ -3,6 +3,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753374.svg)](https://doi.org/10.5281/zenodo.20753374)
 ![Version](https://img.shields.io/badge/version-v3.5.3-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
@@ -308,4 +309,6 @@ If you use CatLab-Tools in your research, please cite:
 
 ## License
 
-MIT — free to use, modify, and distribute.
+MIT License. See [LICENSE](./LICENSE) for full terms.
+
+Copyright (c) 2026 Hoda Jafari
