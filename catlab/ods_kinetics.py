@@ -15,28 +15,9 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import linregress
 from typing import Optional
 import os
-
-MW_S = 32.06   # g/mol sulfur
-
-
-# -------------------------------------------------
-# UNIT CONVERTER  ->  mol/L
-# -------------------------------------------------
-def _to_mol_L(value: float, unit: str, mw: Optional[float] = None) -> float:
-    unit = unit.strip()
-    if unit == "mol/L":    return value
-    elif unit == "mmol/L": return value / 1000.0
-    elif unit in ("mg/L", "ppm"):
-        if mw is None: raise ValueError("mw_pollutant required for mg/L or ppm")
-        return (value / mw) / 1000.0
-    elif unit == "g/L":
-        if mw is None: raise ValueError("mw_pollutant required for g/L")
-        return value / mw
-    elif unit == "ppmS":   return (value / MW_S) / 1000.0
-    else: raise ValueError(f"Unknown unit: {unit}")
+from .kinetics_engine import _fit_nonlinear, _to_mol_L, COLORS, MARKERS
 
 
 # -------------------------------------------------
@@ -70,30 +51,36 @@ def generate_template(output_path: str = "ods_template.xlsx",
 # KINETIC FITTING
 # -------------------------------------------------
 def _fit_kinetics(time: np.ndarray, Ct_mol_L: np.ndarray, C0_mol_L: float) -> dict:
+    """Fit zero/first/second-order models via the shared nonlinear engine."""
     t  = time
     C  = Ct_mol_L
     C0 = C0_mol_L
+    res = _fit_nonlinear(t, C, C0)
 
-    # Zero-order: C0 - Ct = k0 * t
+    def _k(model):
+        r = res.get(model, {})
+        return r.get("k", 0.0) if r.get("converged", True) else 0.0
+
+    def _r2v(model):
+        r = res.get(model, {})
+        v = r.get("R2", float("nan"))
+        return v if not np.isnan(v) else 0.0
+
+    k0   = _k("Zero-order")
+    R2_0 = round(_r2v("Zero-order"), 4)
+
+    kapp = _k("Pseudo-first")
+    R2_1 = round(_r2v("Pseudo-first"), 4)
+
+    k2   = _k("Pseudo-second-order")
+    R2_2 = round(_r2v("Pseudo-second-order"), 4)
+
+    t_half_nl = res.get("Pseudo-first", {}).get("t_half", float("nan"))
+    t_half = round(t_half_nl, 2) if (not np.isnan(t_half_nl) and kapp > 0) else float("nan")
+
     y0 = C0 - C
-    s0, b0, r0, *_ = linregress(t, y0)
-    k0   = max(s0, 0)
-    R2_0 = round(r0**2, 4)
-
-    # Pseudo-first-order: ln(C0/Ct) = kapp * t
     y1 = np.log(C0 / np.clip(C, 1e-15, None))
-    s1, b1, r1, *_ = linregress(t, y1)
-    kapp = max(s1, 0)
-    R2_1 = round(r1**2, 4)
-
-    # Second-order: 1/Ct - 1/C0 = k2 * t
     y2 = (1.0 / np.clip(C, 1e-15, None)) - (1.0 / C0)
-    s2, b2, r2, *_ = linregress(t, y2)
-    k2   = max(s2, 0)
-    R2_2 = round(r2**2, 4)
-
-    # t1/2 from pseudo-first-order
-    t_half = round(np.log(2) / kapp, 2) if kapp > 0 else float("nan")
 
     return {
         "K0 (mol/L/min)"  : round(k0,   8),
@@ -143,10 +130,6 @@ def run_ods_analysis(
     xl       = pd.ExcelFile(excel_path)
     sheets   = xl.sheet_names
 
-    colors  = ["#e41a1c","#377eb8","#4daf4a","#984ea3",
-               "#ff7f00","#a65628","#f781bf","#17becf","#bcbd22"]
-    markers = ["o","s","^","D","v","P","*","X","h"]
-
     results   = []
     fits_data = {}
 
@@ -190,8 +173,8 @@ def run_ods_analysis(
             t_plot = np.insert(t_plot, 0, 0.0)
             X_plot = np.insert(X_plot, 0, 0.0)
         ax.plot(t_plot, X_plot,
-                marker=markers[i % len(markers)],
-                color=colors[i % len(colors)],
+                marker=MARKERS[i % len(MARKERS)],
+                color=COLORS[i % len(COLORS)],
                 label=sheet, lw=2, ms=8,
                 markeredgecolor="white", markeredgewidth=0.7)
     ax.set_xlabel("Time (min)", fontsize=13)
@@ -205,12 +188,13 @@ def run_ods_analysis(
     # ── PLOT 2: Zero-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y0"]
-        s, b, *_ = linregress(t, y)
+        k0 = fit["K0 (mol/L/min)"]
         t_fit = np.linspace(0, t[-1], 200)
         ax.plot(t, y, marker=m, color=c, lw=0, ms=8, label=sheet)
-        ax.plot(t_fit, s * t_fit + b, "--", color=c, lw=1.2, alpha=0.7)
+        if np.isfinite(k0):
+            ax.plot(t_fit, k0 * t_fit, "--", color=c, lw=1.2, alpha=0.7)
     ax.set_xlabel("Time (min)", fontsize=13)
     ax.set_ylabel("C\u2080 \u2212 C\u209c  (mol\u00b7L\u207b\u00b9)", fontsize=13)
     ax.set_title("Zero-Order Kinetics", fontsize=13, fontweight="bold")
@@ -222,12 +206,13 @@ def run_ods_analysis(
     # ── PLOT 3: Pseudo-first-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y1"]
-        s, b, *_ = linregress(t, y)
+        kapp = fit["Kapp (1/min)"]
         t_fit = np.linspace(0, t[-1], 200)
         ax.plot(t, y, marker=m, color=c, lw=0, ms=8, label=sheet)
-        ax.plot(t_fit, s * t_fit + b, "--", color=c, lw=1.2, alpha=0.7)
+        if np.isfinite(kapp):
+            ax.plot(t_fit, kapp * t_fit, "--", color=c, lw=1.2, alpha=0.7)
     ax.set_xlabel("Time (min)", fontsize=13)
     ax.set_ylabel("ln(C\u2080/C\u209c)", fontsize=13)
     ax.set_title("Pseudo-First-Order Kinetics", fontsize=13, fontweight="bold")
@@ -239,12 +224,13 @@ def run_ods_analysis(
     # ── PLOT 4: Second-order ──
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, (sheet, fit) in enumerate(fits_data.items()):
-        c = colors[i % len(colors)]; m = markers[i % len(markers)]
+        c = COLORS[i % len(COLORS)]; m = MARKERS[i % len(MARKERS)]
         t = fit["_t"]; y = fit["_y2"]
-        s, b, *_ = linregress(t, y)
+        k2 = fit["K2 (L/mol/min)"]
         t_fit = np.linspace(0, t[-1], 200)
         ax.plot(t, y, marker=m, color=c, lw=0, ms=8, label=sheet)
-        ax.plot(t_fit, s * t_fit + b, "--", color=c, lw=1.2, alpha=0.7)
+        if np.isfinite(k2):
+            ax.plot(t_fit, k2 * t_fit, "--", color=c, lw=1.2, alpha=0.7)
     ax.set_xlabel("Time (min)", fontsize=13)
     ax.set_ylabel("1/C\u209c \u2212 1/C\u2080  (L\u00b7mol\u207b\u00b9)", fontsize=13)
     ax.set_title("Second-Order Kinetics", fontsize=13, fontweight="bold")

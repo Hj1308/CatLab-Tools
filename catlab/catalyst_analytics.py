@@ -20,34 +20,12 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from dataclasses import dataclass
 from typing import Optional
+from .kinetics_engine import _fit_nonlinear
 
 # ─────────────────────────────────────────
-# CONSTANTS
+# 1. UNIT CONVERTER (delegates to shared engine)
 # ─────────────────────────────────────────
-MW_S = 32.06   # molar mass of sulfur (g/mol)
-
-
-# ─────────────────────────────────────────
-# 1. UNIT CONVERTER
-# ─────────────────────────────────────────
-def convert_to_mmol_L(value: float, unit: str, mw: Optional[float] = None) -> float:
-    """
-    Convert concentration to mmol/L.
-    Supported units: mol/L, mmol/L, mg/L, ppm, g/L, ppmS
-    ppmS auto-converts using MW_S = 32.06 g/mol (sulfur).
-    """
-    unit = unit.strip()
-    if unit == "mol/L":       return value * 1000.0
-    elif unit == "mmol/L":    return value
-    elif unit in ("mg/L", "ppm"):
-        if mw is None: raise ValueError("MW (g/mol) required for mg/L or ppm.")
-        return value / mw
-    elif unit == "g/L":
-        if mw is None: raise ValueError("MW (g/mol) required for g/L.")
-        return (value * 1000.0) / mw
-    elif unit == "ppmS":      return value / MW_S
-    else: raise ValueError(f"Unknown unit: '{unit}'. Supported: mol/L, mmol/L, mg/L, ppm, g/L, ppmS")
-
+from .kinetics_engine import convert_to_mmol_L  # noqa: E402  (re-export for public API)
 
 # ─────────────────────────────────────────
 # 2. SAMPLE METADATA
@@ -65,12 +43,27 @@ class SampleInfo:
     c0_value             : float
     c0_unit              : str
     mw_pollutant         : Optional[float] = None
+    n_sulfur             : int = 1
     active_sites_mmol_g  : Optional[float] = None
     notes                : str = ""
 
     @property
     def c0_mmol_L(self) -> float:
-        return convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        """Compound concentration (mmol / L).  For ppmS inputs the raw
+        conversion returns *sulfur* mmol/L; divide by n_sulfur to recover the
+        compound basis."""
+        v = convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        if self.c0_unit == "ppmS":
+            v /= self.n_sulfur
+        return v
+
+    @property
+    def c0_S_mmol_L(self) -> float:
+        """Sulfur-atom concentration (mmol S / L)."""
+        v = convert_to_mmol_L(self.c0_value, self.c0_unit, self.mw_pollutant)
+        if self.c0_unit != "ppmS":
+            v *= self.n_sulfur
+        return v
     @property
     def catalyst_loading_g_L(self) -> float:
         return self.catalyst_mass_g / self.solution_vol_L
@@ -137,30 +130,48 @@ class KineticsAnalyser:
         self.c    = np.array(concentration, dtype=float)
         self.info = sample_info
         self.c0   = self.c[0]
+        self._nl  = None   # lazy cache for _fit_nonlinear result
+
+    @property
+    def _nonlinear(self):
+        if self._nl is None:
+            self._nl = _fit_nonlinear(self.t, self.c, self.c0)
+        return self._nl
 
     def conversion_profile(self) -> np.ndarray:
         return np.array([calc_conversion(self.c0, ct) for ct in self.c])
 
     def fit_zero_order(self) -> dict:
-        slope, _, r, *_ = linregress(self.t, self.c)
-        return {"model": "Zero-order", "k (mmol/L/h)": round(-slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Zero-order", {})
+        if not r.get("converged", False):
+            return {"model": "Zero-order", "k (mmol/L/h)": 0.0, "R2": 0.0}
+        return {"model": "Zero-order",
+                "k (mmol/L/h)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_first_order(self) -> dict:
-        y = np.log(self.c / self.c0)
-        slope, _, r, *_ = linregress(self.t, y)
-        return {"model": "First-order", "k (h⁻¹)": round(-slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Pseudo-first", {})
+        if not r.get("converged", False):
+            return {"model": "First-order", "k (h\u207b\u00b9)": 0.0, "R2": 0.0}
+        return {"model": "First-order",
+                "k (h\u207b\u00b9)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_second_order(self) -> dict:
-        y = 1.0 / self.c
-        slope, _, r, *_ = linregress(self.t, y)
-        return {"model": "Second-order", "k (L/mmol/h)": round(slope, 5), "R2": round(r**2, 5)}
+        r = self._nonlinear.get("Pseudo-second-order", {})
+        if not r.get("converged", False):
+            return {"model": "Second-order", "k (L/mmol/h)": 0.0, "R2": 0.0}
+        return {"model": "Second-order",
+                "k (L/mmol/h)": round(float(r.get("k", 0.0)), 5),
+                "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_pseudo_first_order(self) -> dict:
+        # Lagergren adsorption model — no engine equivalent, stays linearized
         qe_est = self.c[0] - self.c[-1]
         qt     = self.c[0] - self.c
         y      = np.log(np.clip(qe_est - qt, 1e-12, None))
         slope, intercept, r, *_ = linregress(self.t[:-1], y[:-1])
-        return {"model": "Pseudo-first-order", "k1 (h⁻¹)": round(-slope, 5),
+        return {"model": "Pseudo-first-order", "k1 (h\u207b\u00b9)": round(-slope, 5),
                 "qe (mmol/g)": round(np.exp(intercept), 5), "R2": round(r**2, 5)}
 
     def best_fit(self) -> dict:

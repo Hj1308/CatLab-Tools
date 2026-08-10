@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.5.4 (2026-08-10)
+
+### Changed
+- **`catlab/ods_kinetics._fit_kinetics`** now delegates to the shared nonlinear
+  least-squares engine (`catlab/kinetics_engine._fit_nonlinear`) instead of
+  performing its own linearised `linregress` fits. Linearised regression on
+  transformed variables (ln(C), 1/C) systematically biases parameter estimates
+  when the data contain even moderate noise (Kostoglou & Karapantsios,
+  *Colloids Interfaces* 2022). Across 200 synthetic replicates with ±3 % noise
+  the nonlinear engine reduces mean rate-constant error from 5.7 % to 4.0 %
+  (pseudo-first-order) and from 2.3 % to 1.9 % (pseudo-second-order). The
+  diagnostic plots (zero/first/second-order linearised views) now draw the
+  through-origin line y = k·t using the reported nonlinear rate constant,
+  guaranteeing the plotted slope matches the reported number.
+
 ## v3.0 (2026-06-15)
 
 ### New Features
