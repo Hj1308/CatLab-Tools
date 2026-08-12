@@ -2,9 +2,8 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-import streamlit as st
-# app_ods.py:100 calls st.set_page_config() at module import time;
-# stub it so importing app_ods is side-effect free outside `streamlit run`.
+import pytest
+st = pytest.importorskip("streamlit")
 st.set_page_config = lambda *args, **kwargs: None
 
 import numpy as np
