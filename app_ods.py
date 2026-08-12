@@ -94,6 +94,7 @@ import warnings
 
 from catlab.kinetics_engine import (
     MW_S, N_PARAMS, BEST_MODEL_EXCLUDE, MODEL_NAMES,
+    MIN_FIT_POINTS,
     COLORS, MARKERS,
     _to_mol_L,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
@@ -548,6 +549,7 @@ def _tab_kinetics(cfg, uploaded):
     t_fit_per_cat  = {}
     Ct_fit_per_cat = {}
     auto_excl_per_cat = {}
+    clamped_per_cat   = {}
     t_pre_per_cat     = {}
     rem_pre_per_cat   = {}
 
@@ -583,12 +585,14 @@ def _tab_kinetics(cfg, uploaded):
         # Default 1.0 disables the rule; see README for the validation that led to
         # disabling it (the cutoff increases false-PSO and hurts mechanistic models).
         if not excl_times:
-            auto_excl, t_keep, rem_keep = _auto_saturation_exclusions(
+            auto_excl, t_keep, rem_keep, clamped = _auto_saturation_exclusions(
                 t_keep, rem_keep, max_frac)
         else:
             auto_excl = []
+            clamped = False
 
         auto_excl_per_cat[col] = auto_excl
+        clamped_per_cat[col]  = clamped
         t_pre_per_cat[col]     = t_pre_excl
         rem_pre_per_cat[col]   = rem_pre_excl
 
@@ -598,6 +602,13 @@ def _tab_kinetics(cfg, uploaded):
                 f"ℹ️ **{cat_label}**: auto-excluded saturation point(s) "
                 f"t = {auto_excl} min (removal exceeds {max_frac:.0%} of final "
                 f"removal, Simonin 2016 cutoff). Use manual exclusion above to override.")
+        if clamped:
+            cat_label = col.replace(" Removal (%)","").strip()
+            st.warning(
+                f"⚠️ **{cat_label}**: saturation cutoff could not be fully "
+                f"applied — truncation was stopped at "
+                f"{MIN_FIT_POINTS} points to keep AICc finite. "
+                f"Consider adding more data points or manually excluding runs.")
 
         Ct_keep = C0 * (1 - rem_keep / 100.0)
 
@@ -792,7 +803,8 @@ def _tab_kinetics(cfg, uploaded):
         best = _best_model(res, model_names)
         cat_label = col.replace(" Removal (%)","").strip()
         if best is None:
-            rows.append({"Catalyst": cat_label, "Best Model": "All fits failed"})
+            rows.append({"Catalyst": cat_label, "Best Model": "All fits failed",
+                         "Clamped": "yes" if clamped_per_cat.get(col) else ""})
             continue
         br     = res[best]
         r0     = br.get("r0", float("nan"))
@@ -821,6 +833,7 @@ def _tab_kinetics(cfg, uploaded):
             "r₀ (mol/L/min)":     _fmt_sci(r0),
             "r₀/m (mol/g/min)":   _fmt_sci(r0_m),
             "L-H Regime":         br.get("regime","–") if best == "L-H" else "–",
+            "Clamped":            "yes" if clamped_per_cat.get(col) else "",
             "Note":               " | ".join(notes),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True)

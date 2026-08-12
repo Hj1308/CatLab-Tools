@@ -13,6 +13,19 @@ MW_S = 32.06  # g/mol
 # N_PARAMS holds the number of fitted regression parameters (C0 is locked).
 # _aic / _aicc add +1 internally for the residual variance sigma^2.
 # _adj_r2 and the residual-diagnostics dof in app_ods.py use the raw value.
+# Minimum retained data points so AICc stays finite for the WHOLE model
+# portfolio at any saturation cutoff.  With K = p + 1 (sigma^2 counted, see
+# _aicc) the AICc denominator is n - K - 1, so a finite AICc requires n > p + 2:
+#
+#     p (params)   K = p+1   min n (finite AICc)
+#         1          2              4
+#         2          3              5
+#         3          4              6
+#
+# The widest model, Double-Exponential, has p=3, so n must be >= 6.  The floor
+# is therefore 6, not 5: a model set that silently shrinks as n drops would
+# make "best model" incomparable between catalysts.
+MIN_FIT_POINTS = 6
 N_PARAMS = {
     "Zero-order":          1,
     "Pseudo-first":        1,
@@ -602,23 +615,33 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     Simonin (2016) fractional-uptake cutoff for auto-saturation exclusion.
 
     Exclude any data point whose removal/conversion exceeds
-    max_fractional_uptake * (final/equilibrium removal value). Because removal is
-    monotonically increasing in time, this drops the near-equilibrium plateau tail
-    (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation), which
-    carries no rate-constant information. Default 1.0 disables the rule: internal
-    validation against the full 9-model portfolio showed the cutoff increases false
-    PSO selection and degrades mechanistic-model recovery (see README).
+    max_fractional_uptake * (final/equilibrium removal value).  Because removal
+    is monotonically increasing in time, this drops the near-equilibrium plateau
+    tail (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation),
+    which carries no rate-constant information.  Default 1.0 disables the rule:
+    internal validation against the full 9-model portfolio showed the cutoff
+    increases false PSO selection and degrades mechanistic-model recovery
+    (see README).
 
-    Returns (excluded_time_points, t_keep, rem_keep).
+    The retained set is never allowed to drop below MIN_FIT_POINTS, which keeps
+    AICc finite for the whole portfolio (up to p=3, K=p+1=4) — see the constant's
+    docstring.
+
+    Returns (excluded_time_points, t_keep, rem_keep, truncation_clamped).
+    truncation_clamped is True when the cutoff could not be fully applied: the
+    retained set is at (or below) MIN_FIT_POINTS while its tail still exceeds the
+    cutoff — including the case where no point could be dropped at all.
     """
     t_keep   = np.asarray(t_raw, dtype=float).copy()
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
-    if len(rem_keep) >= 3:
-        eq_rem = rem_keep[-1]  # final / equilibrium removal (%)
+    clamped  = False
+    if len(rem_keep) >= MIN_FIT_POINTS:
+        eq_rem = rem_keep[-1]
         cutoff = max_fractional_uptake * eq_rem
-        while len(rem_keep) >= 3 and rem_keep[-1] > cutoff:
+        while len(rem_keep) > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
             excluded.append(int(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
-    return excluded, t_keep, rem_keep
+        clamped = len(rem_keep) <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
+    return excluded, t_keep, rem_keep, clamped

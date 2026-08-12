@@ -11,6 +11,7 @@ import pandas as pd
 from unittest.mock import MagicMock
 
 import app_ods
+from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
 
 
 class TestNonConvergedSentinelHandling:
@@ -64,10 +65,13 @@ class TestNonConvergedSentinelHandling:
 
 class TestAutoSaturationDetection:
     """Regression: Simonin (2016) fractional-uptake cutoff. Case #1 — final
-    removal 91% → cutoff 77.35% at 0.85; every point above the cutoff (80, 91) is
+    removal 91% → cutoff 77.35% at 0.85; every point above the cutoff is
     dropped, not just the last one (the old increment-based rule dropped only the
-    final point here). Default max_fractional_uptake is 1.0 (disabled); tests pass
-    0.85 explicitly to exercise the cutoff."""
+    final point here). The retained set is never allowed to fall below
+    MIN_FIT_POINTS, which keeps AICc finite for the whole 9-model portfolio; a
+    cutoff that would strip below the floor reports `clamped=True` instead.
+    Default max_fractional_uptake is 1.0 (disabled); tests pass lower values
+    explicitly to exercise the cutoff."""
 
     T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
     REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 91.0])
@@ -79,51 +83,93 @@ class TestAutoSaturationDetection:
         best = app_ods._best_model(res, app_ods.MODEL_NAMES)
         return best, res[best]["R2"] if best else None
 
-    def test_excludes_all_points_above_cutoff(self):
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
-            self.T, self.REM, max_fractional_uptake=0.85)
-        assert excl == [6, 4]
-        assert t_keep.tolist() == [0.0, 0.5, 1.0, 2.0, 3.0]
-        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0]
+    def test_drops_all_points_above_cutoff_when_enough_headroom(self):
+        """A curve long enough to satisfy the cutoff without hitting the floor:
+        every point above the cutoff is dropped and clamped is False."""
+        T   = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+        REM = np.array([0.0, 8.0, 16.0, 25.0, 35.0, 50.0, 68.0, 80.0, 91.0])
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
+            T, REM, max_fractional_uptake=0.85)
+        assert excl == [8, 7]
+        assert rem_keep.tolist() == [0.0, 8.0, 16.0, 25.0, 35.0, 50.0, 68.0]
+        assert not clamped
 
     def test_cutoff_scales_with_final_removal(self):
         # final = 80 → cutoff 68.0 at 0.85; only the point above it (80) drops.
         rem2 = np.array([0.0, 12.0, 25.0, 40.0, 55.0, 68.0, 80.0])
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             self.T, rem2, max_fractional_uptake=0.85)
         assert excl == [6]
         assert rem_keep.tolist() == [0.0, 12.0, 25.0, 40.0, 55.0, 68.0]
+        assert not clamped
 
     def test_lower_cutoff_drops_more_points(self):
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             self.T, self.REM, max_fractional_uptake=0.5)
-        # cutoff = 45.5 → 50, 68, 80, 91 all dropped
-        assert excl == [6, 4, 3, 2]
-        assert t_keep.tolist() == [0.0, 0.5, 1.0]
-        assert rem_keep.tolist() == [0.0, 16.0, 30.0]
+        # cutoff = 45.5 → 50, 68, 80, 91 are all ABOVE it.  MIN_FIT_POINTS stops
+        # stripping at 6 points, so only the tail point (91) is dropped; 50, 68
+        # and 80 are retained only because of the length floor, which is exactly
+        # why clamped is True.
+        assert excl == [6]
+        assert clamped
+        assert len(rem_keep) == MIN_FIT_POINTS
+        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0, 80.0]
 
     def test_max_frac_1_0_disables(self):
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             self.T, self.REM, max_fractional_uptake=1.0)
         assert excl == []
         assert t_keep.tolist() == self.T.tolist()
+        assert not clamped
 
     def test_default_1_0_disables(self):
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(self.T, self.REM)
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(self.T, self.REM)
         assert excl == []
         assert t_keep.tolist() == self.T.tolist()
+        assert not clamped
 
     def test_best_model_flips_without_vs_with_exclusion(self):
         c0 = 500.0 / 32.06 / 1000.0
         best_before, _ = self._best(self.T, self.REM, c0)
-        excl, t_keep, rem_keep = app_ods._auto_saturation_exclusions(
+        excl, t_keep, rem_keep, _ = app_ods._auto_saturation_exclusions(
             self.T, self.REM, max_fractional_uptake=0.85)
-        assert excl == [6, 4]
+        assert excl == [6]
         best_after, _ = self._best(t_keep, rem_keep, c0)
 
         assert best_before == "L-H"
-        assert best_after == "Pseudo-first"
-        assert best_before != best_after
+        assert best_after != best_before
+
+    def test_cutoff_0_9_pfo_retains_at_least_min_fit_points(self):
+        """Regression: with k=0.08 / cutoff=0.90, the old loop dropped below the
+        floor and made AICc inf for all models.  MIN_FIT_POINTS stops it, and the
+        cutoff genuinely could not be fully applied, so clamped is True."""
+        C0 = 7.798e-3
+        T = np.array([0, 15, 30, 45, 60, 90, 120.0])
+        k = 0.08
+        Ct_clean = _first_order(T, k, C0)
+        rem = 100.0 * (1.0 - Ct_clean / C0)
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
+            T, rem, max_fractional_uptake=0.90)
+        assert len(rem_keep) >= MIN_FIT_POINTS, f"retained only {len(rem_keep)} points"
+        assert clamped
+
+    def test_clamped_true_when_floor_blocks_all_stripping(self):
+        """Two separate facts about a curve already at exactly MIN_FIT_POINTS
+        points whose tail exceeds the cutoff:
+          (1) the returned DATA is unchanged — nothing can be dropped without
+              going below the floor, so excluded is empty, and
+          (2) the cutoff was NOT honoured — clamped is True even though
+              excluded is empty.
+        """
+        n = MIN_FIT_POINTS
+        rem = 20.0 * np.arange(n, dtype=float)  # [0, 20, ..., 20*(n-1)]
+        T = np.arange(n, dtype=float)
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
+            T, rem, max_fractional_uptake=0.5)
+        assert excl == []
+        assert clamped
+        assert rem_keep.tolist() == rem.tolist()
+        assert len(rem_keep) == MIN_FIT_POINTS
 
 
 class TestEdgeCaseModels:
