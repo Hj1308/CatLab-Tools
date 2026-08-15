@@ -88,6 +88,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.integrate import odeint   # FIX W: removed unused 'quad'
+from scipy import stats as scipy_stats
 import io
 import zipfile
 import warnings
@@ -1527,6 +1528,24 @@ def _tab_comparison(cfg):
 # ================================================================
 # TAB 8 — Arrhenius Multi-Temperature Analysis
 # ================================================================
+def _arrhenius_ci(cov, n_T):
+    """95% confidence intervals for Eₐ and ln A from an Arrhenius fit.
+
+    Uses the t-distribution critical value t(0.975, n_T - 2) rather than the
+    normal-approximation z = 1.96, which understates the interval when only a
+    few temperature points are available. For n_T == 2 (df == 0) no valid CI
+    exists: both bounds are returned as NaN and df is returned as 0 so the
+    caller can surface a warning (point estimate of Eₐ only).
+    """
+    df = n_T - 2
+    if df < 1:
+        return np.nan, np.nan, df
+    t_crit = scipy_stats.t.ppf(0.975, df)
+    Ea_ci = np.sqrt(cov[0, 0]) * R_GAS / 1000.0 * t_crit
+    lnA_ci = np.sqrt(cov[1, 1]) * t_crit
+    return Ea_ci, lnA_ci, df
+
+
 def _tab_arrhenius(cfg):
     st.header("🌡️ Tab 8 — Arrhenius Analysis (Multi-Temperature)")
     st.markdown(r"""
@@ -1606,12 +1625,23 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
             inv_T_v = np.array([1.0 / T for T in T_valid])
             ln_k    = np.log(np.array(k_vals))
             try:
-                coeffs, cov = np.polyfit(inv_T_v, ln_k, 1, cov=True)
+                n_T = len(k_vals)
+                df_arr = n_T - 2
+                if df_arr >= 1:
+                    coeffs, cov = np.polyfit(inv_T_v, ln_k, 1, cov=True)
+                    Ea_ci, lnA_ci, df_arr = _arrhenius_ci(cov, n_T)
+                else:
+                    coeffs = np.polyfit(inv_T_v, ln_k, 1)
+                    Ea_ci, lnA_ci, df_arr = _arrhenius_ci(None, n_T)
+                    st.warning(
+                        "⚠️ **2-point Arrhenius fit** — only 2 temperatures were used, "
+                        "so the fit has zero degrees of freedom (df = n_T − 2 = 0). "
+                        "No valid 95% confidence interval can be reported; only the "
+                        "point estimate of Eₐ is shown."
+                    )
                 slope = coeffs[0]; intercept = coeffs[1]
                 Ea_kJ = -slope * R_GAS / 1000.0
                 A_val = np.exp(intercept)
-                Ea_ci = np.sqrt(cov[0,0]) * R_GAS / 1000.0 * 1.96
-                lnA_ci = np.sqrt(cov[1,1]) * 1.96
                 r2_arr = _r2(ln_k, np.polyval(coeffs, inv_T_v))
                 ax.scatter(inv_T_v * 1000, ln_k, color=color,
                            marker=MARKERS[ci % len(MARKERS)], s=70, zorder=5, label=cat)
@@ -1621,15 +1651,19 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                     ax.annotate(f"{T_-273.15:.0f}°C", (x_*1000, y_),
                                 textcoords="offset points", xytext=(4,4), fontsize=8)
                 ax.set_xlabel("1000/T (K⁻¹)"); ax.set_ylabel("ln k")
-                ax.set_title(f"{cat}\nEₐ = {Ea_kJ:.1f} ± {Ea_ci:.1f} kJ/mol\nR² = {r2_arr:.4f}")
+                if df_arr >= 1:
+                    title_ea = f"Eₐ = {Ea_kJ:.1f} ± {Ea_ci:.1f} kJ/mol (t, 95% CI)"
+                else:
+                    title_ea = f"Eₐ = {Ea_kJ:.1f} kJ/mol (no CI: df = 0)"
+                ax.set_title(f"{cat}\n{title_ea}\nR² = {r2_arr:.4f}")
                 arrh_rows.append({"Catalyst": cat,
                                   "Eₐ (kJ/mol)": round(Ea_kJ, 2),
-                                  "± 95% CI Eₐ (kJ/mol)": round(Ea_ci, 2),
+                                  "± 95% CI Eₐ (kJ/mol, t)": round(Ea_ci, 2) if df_arr >= 1 else "N/A",
                                   "ln A": round(intercept, 3),
-                                  "± 95% CI ln A": round(lnA_ci, 3),
+                                  "± 95% CI ln A (t)": round(lnA_ci, 3) if df_arr >= 1 else "N/A",
                                   "A": _fmt_sci(A_val),
                                   "R² (Arrhenius)": round(r2_arr, 4),
-                                  "n_T": len(k_vals)})
+                                  "n_T": n_T})
             except Exception as e:
                 ax.set_title(f"{cat}\nFit failed: {e}")
                 arrh_rows.append({"Catalyst": cat, "Eₐ (kJ/mol)": f"Error: {e}", "n_T": len(k_vals)})
@@ -1708,7 +1742,6 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     ddof_use = p_free if (n - p_free) > 0 else 0
     sigma    = np.std(residuals, ddof=ddof_use)
     std_resid = residuals / sigma if sigma > 0 else residuals
-    from scipy import stats as scipy_stats
     col_a, col_b, col_c, col_d = st.columns(4)
     col_a.metric("R²",        f"{res['R2']:.4f}")
     col_b.metric("Adj-R²",    f"{res.get('adj_r2',float('nan')):.4f}"

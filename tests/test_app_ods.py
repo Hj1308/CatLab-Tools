@@ -9,6 +9,7 @@ st.set_page_config = lambda *args, **kwargs: None
 import numpy as np
 import pandas as pd
 from unittest.mock import MagicMock
+from scipy import stats as scipy_stats
 
 import app_ods
 from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
@@ -214,3 +215,94 @@ class TestEdgeCaseModels:
         lh = res["L-H"]
         assert abs(lh["k"] - k_true) / k_true < 0.02
         assert abs(lh["K_ads"] - K_true) / K_true < 0.02
+
+
+class TestArrheniusConfidenceInterval:
+    """Arrhenius 95% CI uses the t-distribution (df = n_T - 2), not the
+    normal-approximation z = 1.96, which understates the interval by ~6x at
+    n_T = 3 (df = 1) and ~1.6x at n_T = 5 (df = 3)."""
+
+    @staticmethod
+    def _synthetic_k(temps_C, noise=0.0):
+        rng = np.random.default_rng(0)
+        A = 1e8
+        Ea = 50000.0  # J/mol
+        T = np.asarray(temps_C, dtype=float) + 273.15
+        k = A * np.exp(-Ea / (app_ods.R_GAS * T))
+        if noise > 0:
+            k = k * np.exp(rng.normal(0.0, noise, size=k.shape))
+        return T, k
+
+    @staticmethod
+    def _fit(T, k):
+        inv_T = 1.0 / T
+        ln_k = np.log(k)
+        coeffs, cov = np.polyfit(inv_T, ln_k, 1, cov=True)
+        return coeffs, cov
+
+    def test_ci_uses_t_distribution_3_points(self):
+        T, k = self._synthetic_k([25.0, 40.0, 55.0], noise=0.02)
+        coeffs, cov = self._fit(T, k)
+        Ea_ci, lnA_ci, df = app_ods._arrhenius_ci(cov, 3)
+
+        old_Ea_ci = np.sqrt(cov[0, 0]) * app_ods.R_GAS / 1000.0 * 1.96
+        old_lnA_ci = np.sqrt(cov[1, 1]) * 1.96
+        expected_ratio = scipy_stats.t.ppf(0.975, 1) / 1.96
+
+        assert df == 1
+        assert np.isclose(Ea_ci / old_Ea_ci, expected_ratio, rtol=1e-6)
+        assert np.isclose(lnA_ci / old_lnA_ci, expected_ratio, rtol=1e-6)
+        assert Ea_ci > old_Ea_ci
+
+    def test_ci_uses_t_distribution_5_points(self):
+        T, k = self._synthetic_k([25.0, 35.0, 45.0, 55.0, 65.0], noise=0.02)
+        coeffs, cov = self._fit(T, k)
+        Ea_ci, lnA_ci, df = app_ods._arrhenius_ci(cov, 5)
+
+        old_Ea_ci = np.sqrt(cov[0, 0]) * app_ods.R_GAS / 1000.0 * 1.96
+        expected_ratio = scipy_stats.t.ppf(0.975, 3) / 1.96
+
+        assert df == 3
+        assert np.isclose(Ea_ci / old_Ea_ci, expected_ratio, rtol=1e-6)
+        assert Ea_ci > old_Ea_ci
+
+    def test_two_points_returns_nan_and_zero_df(self):
+        # cov is ignored when df < 1; pass a placeholder.
+        Ea_ci, lnA_ci, df = app_ods._arrhenius_ci(np.zeros((2, 2)), 2)
+        assert df == 0
+        assert np.isnan(Ea_ci)
+        assert np.isnan(lnA_ci)
+
+    def test_two_point_fit_warns_no_ci(self, monkeypatch):
+        st = MagicMock()
+
+        class _FakeFile:
+            def __init__(self, name):
+                self.name = name
+
+            def seek(self, *a, **k):
+                pass
+
+        f1, f2 = _FakeFile("T25.xlsx"), _FakeFile("T40.xlsx")
+        st.file_uploader.return_value = [f1, f2]
+        st.number_input.side_effect = [25.0, 40.0]
+        st.selectbox.return_value = "Pseudo-first"
+        st.button.return_value = True
+        st.progress.return_value = MagicMock()
+        monkeypatch.setattr(app_ods, "st", st)
+
+        df = pd.DataFrame({
+            "Time (min)": [0, 5, 10, 20],
+            "Cat-A Removal (%)": [0, 20, 40, 60],
+        })
+        monkeypatch.setattr(app_ods, "_load_kinetic_data",
+                            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]))
+
+        k_iter = iter([0.010, 0.014])
+        monkeypatch.setattr(app_ods, "_fit_nonlinear",
+                            lambda t, Ct, C0: {"Pseudo-first": {"k": next(k_iter), "converged": True}})
+
+        app_ods._tab_arrhenius({"C0": 0.015})
+
+        messages = [str(c.args[0]) for c in st.warning.call_args_list]
+        assert any("no valid 95% confidence interval" in m.lower() for m in messages)
