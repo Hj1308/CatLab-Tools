@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use this software in your research, please cite it as below."
 title: "CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite"
-version: 3.5.3
-doi: 10.5281/zenodo.20753374
-date-released: 2026-06-21
+version: 3.5.5
+doi: 10.5281/zenodo.21965745
+date-released: 2026-08-16
 license: MIT
 repository-code: https://github.com/Hj1308/CatLab-Tools
 url: https://github.com/Hj1308/CatLab-Tools

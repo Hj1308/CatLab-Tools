@@ -1,7 +1,7 @@
 # CatLab-Tools 🔬
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753374.svg)](https://doi.org/10.5281/zenodo.20753374)
-![Version](https://img.shields.io/badge/version-v3.5.3-blue?style=flat-square)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21965745.svg)](https://doi.org/10.5281/zenodo.21965745)
+![Version](https://img.shields.io/badge/version-v3.5.5-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
@@ -9,7 +9,7 @@
 ![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ods-kinetics.streamlit.app)
 
-**ODS Calculation Suite — v3.5.3**
+**ODS Calculation Suite — v3.5.5**
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
 ---
@@ -245,10 +245,10 @@ Download the advanced template from Tab 1 to get a pre-filled Excel file.
 
 ```
 CatLab-Tools/
-├── app_ods.py          # Main Streamlit app (v3.5.3)
+├── app_ods.py          # Main Streamlit app (v3.5.5)
 ├── requirements.txt    # numpy, pandas, matplotlib, scipy, openpyxl, streamlit
 ├── CHANGELOG.md        # Full version history
-├── CITATION.cff        # Citation metadata (DOI: 10.5281/zenodo.20753374)
+├── CITATION.cff        # Citation metadata (DOI: 10.5281/zenodo.21965745)
 ├── catlab/             # Core Python library modules
 ├── examples/           # Example datasets
 ├── tests/              # Unit tests
@@ -302,8 +302,8 @@ CatLab-Tools/
 
 If you use CatLab-Tools in your research, please cite:
 
-> Jafari, H. (2025). *CatLab-Tools: ODS Calculation Suite* (v3.5.3). Zenodo.
-> DOI: [10.5281/zenodo.20753374](https://doi.org/10.5281/zenodo.20753374)
+> Jafari, H. (2026). *CatLab-Tools: ODS Calculation Suite* (v3.5.5). Zenodo.
+> DOI: [10.5281/zenodo.21965745](https://doi.org/10.5281/zenodo.21965745)
 
 ---
 
