@@ -35,6 +35,10 @@
 #      moment it finishes.  On startup the checkpoint is read and finished
 #      tasks are skipped, so an interrupted run resumes.  The report is
 #      regenerated purely from the checkpoint; `--report-only` refits nothing.
+#      Wall-clock timing is persisted next to the checkpoint in
+#      tests/validation/.checkpoint_meta.json ({"elapsed_s", "last_run_utc"})
+#      whenever real fitting happens, and `--report-only` reloads it — so the
+#      report never fabricates a fresh 0s for a checkpoint that took real time.
 #   5. SMOKE MODE.  `--replicates N` (default 200) scales the run; start with
 #      `--replicates 20` (~1 min) to validate the pipeline and the conversion-
 #      window assertions before the full run.  Smoke numbers are never
@@ -90,7 +94,8 @@
 #   # or as the pytest slow test (excluded from the default suite by pytest.ini):
 #   python -m pytest tests -m slow
 #
-#   # regenerate the report from an existing checkpoint without refitting:
+#   # regenerate the report from an existing checkpoint without refitting
+#   # (wall-clock timing is reloaded from .checkpoint_meta.json):
 #   python tests\validation\model_recovery.py --report-only
 
 import os, sys
@@ -226,6 +231,39 @@ def _maybe_progress(completed, total, t0):
               f"elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
 
 
+# ---- timing sidecar (wall-clock elapsed, persisted across runs) --------
+def _meta_path(out_dir):
+    return os.path.join(out_dir, ".checkpoint_meta.json")
+
+def _read_meta(out_dir):
+    """Load {"elapsed_s": float, "last_run_utc": str}; None if absent/unreadable."""
+    p = _meta_path(out_dir)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            meta = json.load(f)
+        return {"elapsed_s": float(meta["elapsed_s"]),
+                "last_run_utc": str(meta.get("last_run_utc", ""))}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+def _write_meta(out_dir, elapsed_s, reset=False):
+    """Persist wall-clock timing after a real fitting run.
+
+    ACCUMULATES across invocations: a partial/resumed run adds its own
+    elapsed to the previous total, so the report's wall clock is the total
+    time spent producing the checkpoint's tasks.  `--fresh` resets the
+    accumulation along with the checkpoint.  last_run_utc is the end of the
+    latest invocation that actually fitted."""
+    prior = 0.0 if reset else (_read_meta(out_dir) or {}).get("elapsed_s", 0.0)
+    meta = {"elapsed_s": prior + elapsed_s,
+            "last_run_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                          time.gmtime())}
+    with open(_meta_path(out_dir), "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+
+
 # ---- aggregation (from the checkpoint) ---------------------------------
 def _aggregate(records, replicates, names):
     per_cut = {}
@@ -315,12 +353,16 @@ def _fmt_pct(x):
     return "n/a" if not np.isfinite(x) else f"{x:.1f}"
 
 def _render(agg, elapsed_s, out_dir, names):
+    # None = no timing data recorded (e.g. checkpoint predates the sidecar);
+    # say so explicitly rather than print a fabricated 0s.
+    wall_clock = ("Wall clock: n/a (no timing data recorded)"
+                  if elapsed_s is None else f"Wall clock: {elapsed_s:.0f}s.")
     rows = ["# Model Recovery Validation",
             f"C0 = {C0:.4e} mol/L, N = {agg['replicates']} seeds x "
             f"{len(names)} archetypes, seed = {BASE_SEED}",
             f"Paired cutoff sweep: all 5 cutoffs applied to the same noisy "
             f"dataset per (archetype, replicate). Completed tasks: "
-            f"{agg['n_tasks_completed']}. Wall clock: {elapsed_s:.0f}s.",
+            f"{agg['n_tasks_completed']}. {wall_clock}",
             "",
             "## Per-cutoff sweep (saturation cutoff vs recovery)",
             "",
@@ -407,7 +449,6 @@ def run(replicates=N_SEEDS, workers=None, out_dir=None,
 
     tasks = [(name, ri) for name in names for ri in range(replicates)]
     pending = [t for t in tasks if t not in done]
-    elapsed = 0.0
     if not report_only and pending:
         workers = workers if workers is not None \
             else max(1, (os.cpu_count() or 2) - 1)
@@ -431,11 +472,17 @@ def run(replicates=N_SEEDS, workers=None, out_dir=None,
                     completed += 1
                     _maybe_progress(completed, total, t0)
         elapsed = time.time() - t0
+        _write_meta(out_dir, elapsed, reset=fresh)
         print(f"fitting done in {elapsed:.0f}s", flush=True)
 
+    # Wall clock for the report: the persisted total (covers resumed runs);
+    # None if no real run has ever recorded timing.
+    meta = _read_meta(out_dir)
+    elapsed_s = meta["elapsed_s"] if meta is not None else None
+
     agg = _aggregate(records, replicates, names)
-    agg["timing"]["elapsed_s"] = elapsed
-    md = _render(agg, elapsed, out_dir, names)
+    agg["timing"]["elapsed_s"] = elapsed_s if elapsed_s is not None else 0.0
+    md = _render(agg, elapsed_s, out_dir, names)
     return md, agg
 
 

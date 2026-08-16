@@ -229,3 +229,44 @@ class TestHarnessDeterminism:
         agg1.pop("timing", None)
         agg4.pop("timing", None)
         assert agg1 == agg4
+
+
+class TestHarnessTimingReport:
+    """--report-only reloads the persisted wall-clock sidecar
+    (.checkpoint_meta.json) and never fabricates a 0s for a checkpoint that
+    took real time.  No fitting happens in these tests."""
+
+    @staticmethod
+    def _fake_record():
+        return {"archetype": "PSO-A", "replicate": 0, "fit_ms": 1000.0,
+                "cutoffs": {ck: {"best": "Pseudo-second-order",
+                                 "n_pts": 6, "clamped": False}
+                            for ck in ("1.00", "0.95", "0.90", "0.85", "0.80")}}
+
+    def _report_only(self, tmp_path):
+        script = os.path.join(os.path.dirname(__file__),
+                              "validation", "model_recovery.py")
+        proc = subprocess.run(
+            [sys.executable, "-u", script, "--report-only",
+             "--out", str(tmp_path), "--archetypes", "PSO-A"],
+            capture_output=True, text=True, timeout=600)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        return proc.stdout
+
+    def _write_checkpoint(self, tmp_path):
+        with open(tmp_path / ".checkpoint.jsonl", "w", encoding="utf-8") as f:
+            f.write(json.dumps(self._fake_record(), sort_keys=True) + "\n")
+
+    def test_no_sidecar_reports_n_a_not_0s(self, tmp_path):
+        self._write_checkpoint(tmp_path)  # no .checkpoint_meta.json
+        out = self._report_only(tmp_path)
+        assert "Wall clock: n/a (no timing data recorded)" in out
+        assert "Wall clock: 0s" not in out
+
+    def test_sidecar_value_reused(self, tmp_path):
+        self._write_checkpoint(tmp_path)
+        with open(tmp_path / ".checkpoint_meta.json", "w",
+                  encoding="utf-8") as f:
+            json.dump({"elapsed_s": 42.0, "last_run_utc": "2026-08-12T22:15:08Z"}, f)
+        out = self._report_only(tmp_path)
+        assert "Wall clock: 42s." in out

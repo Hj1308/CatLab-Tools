@@ -29,6 +29,7 @@ htmlcov/
 
 # Validation harness intermediates (regenerable, not results)
 tests/validation/.checkpoint.jsonl
+tests/validation/.checkpoint_meta.json
 tests/validation/run.log
 tests/validation/results.json
 p1.diff
