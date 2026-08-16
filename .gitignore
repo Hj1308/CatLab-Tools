@@ -26,3 +26,10 @@ Thumbs.db
 .coverage.*
 htmlcov/
 .pytest_cache/
+
+# Validation harness intermediates (regenerable, not results)
+tests/validation/.checkpoint.jsonl
+tests/validation/run.log
+tests/validation/results.json
+p1.diff
+p2.diff

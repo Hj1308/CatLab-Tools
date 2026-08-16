@@ -10,6 +10,22 @@ from scipy.integrate import odeint
 
 # -- Constants ----------------------------------------------------
 MW_S = 32.06  # g/mol
+# N_PARAMS holds the number of fitted regression parameters (C0 is locked).
+# _aic / _aicc add +1 internally for the residual variance sigma^2.
+# _adj_r2 and the residual-diagnostics dof in app_ods.py use the raw value.
+# Minimum retained data points so AICc stays finite for the WHOLE model
+# portfolio at any saturation cutoff.  With K = p + 1 (sigma^2 counted, see
+# _aicc) the AICc denominator is n - K - 1, so a finite AICc requires n > p + 2:
+#
+#     p (params)   K = p+1   min n (finite AICc)
+#         1          2              4
+#         2          3              5
+#         3          4              6
+#
+# The widest model, Double-Exponential, has p=3, so n must be >= 6.  The floor
+# is therefore 6, not 5: a model set that silently shrinks as n drops would
+# make "best model" incomparable between catalysts.
+MIN_FIT_POINTS = 6
 N_PARAMS = {
     "Zero-order":          1,
     "Pseudo-first":        1,
@@ -19,7 +35,7 @@ N_PARAMS = {
     "Power-Law":           2,
     "Eley-Rideal":         2,
     "Avrami":              2,
-    "Double-Exponential":  4,
+    "Double-Exponential":  3,   # k1, k2, A  (C0 is locked)
 }
 COLORS = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#17becf", "#bcbd22"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
@@ -203,27 +219,35 @@ def _adj_r2(r2, n, p):
     return round(1 - (1 - r2) * (n - 1) / (n - p - 1), 4)
 
 def _aic(y_obs, y_pred, p):
+    """AIC for nonlinear least squares.
+
+    `p` is the number of fitted regression parameters.  The residual variance
+    sigma^2 is an additional estimated parameter, so the effective parameter
+    count is K = p + 1 (Burnham & Anderson 2002, §2.2).
+    """
     n = len(y_obs)
     rss = np.sum((y_obs - y_pred) ** 2)
     if rss <= 0 or n == 0:
         return float("inf")
-    return round(n * np.log(rss / n) + 2 * p, 4)
+    K = p + 1
+    return round(n * np.log(rss / n) + 2 * K, 4)
+
 
 def _aicc(y_obs, y_pred, p):
-    """
-    FIX S: small-sample corrected AIC. With few data points the plain AIC
-    penalty (2p) is too weak and over-parameterised models win spuriously.
-    AICc = AIC + 2p(p+1)/(n-p-1). Returns inf when n - p - 1 <= 0, which
-    flags the model as unsuitable for the available number of points.
+    """Small-sample corrected AIC. K = p + 1 (includes sigma^2).
+
+    Returns inf when n - K - 1 <= 0, which correctly flags a model as
+    unsupportable by the available number of data points.
     """
     n = len(y_obs)
     aic = _aic(y_obs, y_pred, p)
     if np.isinf(aic):
         return float("inf")
-    denom = n - p - 1
+    K = p + 1
+    denom = n - K - 1
     if denom <= 0:
         return float("inf")
-    return round(aic + (2.0 * p * (p + 1)) / denom, 4)
+    return round(aic + (2.0 * K * (K + 1)) / denom, 4)
 
 
 # -- t1/2 helpers -------------------------------------------------
@@ -533,10 +557,8 @@ def _best_model(res, model_names):
     2. Find model with lowest AICc (best_aicc).
     3. Parsimony window (DELTA=2.5): collect all models within 2.5 AICc units
        of best_aicc — these are statistically indistinguishable.
-    4. Within the competitive set:
-       a. If Pseudo-second-order is present AND its R² >= (best R² - 0.01),
-          return it — physically most meaningful for ODS heterogeneous catalysis.
-       b. Otherwise return the model with fewest parameters (then lowest AICc).
+    4. Among the competitive set: fewest regression parameters, then lowest AICc.
+       No model-identity-based preference of any kind.
     """
     valid = _get_valid_models(res, model_names)
     candidates = {m: r for m, r in valid.items()
@@ -553,16 +575,39 @@ def _best_model(res, model_names):
     competitive = {m: r for m, r in candidates.items()
                    if r["aicc"] - best_aicc_val <= DELTA}
 
-    # Step 3: prefer Pseudo-second-order if competitive and R² close to best
-    if "Pseudo-second-order" in competitive:
-        pso_r2      = competitive["Pseudo-second-order"].get("R2", 0)
-        best_r2     = max(r.get("R2", 0) for r in competitive.values())
-        if pso_r2 >= best_r2 - 0.01:
-            return "Pseudo-second-order"
-
-    # Step 4: parsimony — fewest parameters, then lowest AICc
+    # Step 3: parsimony — fewest parameters, then lowest AICc
     return min(competitive,
                key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
+
+
+def akaike_weights(results, model_names=None, exclude=None):
+    """Akaike weights w_i over the candidate model set.
+
+    delta_i = AICc_i - min(AICc);  w_i = exp(-delta_i/2) / sum_j exp(-delta_j/2)
+    w_i is the relative weight of evidence for model i given the candidate set
+    (Burnham & Anderson 2002, §2.9).  Reporting delta_i and w_i is preferred
+    over naming a single "best" model.
+
+    Returns {model_name: {"delta_aicc": float, "weight": float}}.
+    Models with non-finite AICc, or in `exclude`, are omitted.
+    """
+    if model_names is None:
+        model_names = MODEL_NAMES
+    if exclude is None:
+        exclude = BEST_MODEL_EXCLUDE
+    finites = {m: results[m]["aicc"] for m in model_names
+               if m in results
+               and m not in exclude
+               and np.isfinite(results[m].get("aicc", float("inf")))}
+    if not finites:
+        return {}
+    aicc_min = min(finites.values())
+    deltas = {m: v - aicc_min for m, v in finites.items()}
+    exp_terms = {m: np.exp(-d / 2.0) for m, d in deltas.items()}
+    total = sum(exp_terms.values())
+    return {m: {"delta_aicc": round(deltas[m], 4),
+                "weight": round(exp_terms[m] / total, 6)}
+            for m in finites}
 
 
 def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
@@ -570,23 +615,33 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     Simonin (2016) fractional-uptake cutoff for auto-saturation exclusion.
 
     Exclude any data point whose removal/conversion exceeds
-    max_fractional_uptake * (final/equilibrium removal value). Because removal is
-    monotonically increasing in time, this drops the near-equilibrium plateau tail
-    (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation), which
-    carries no rate-constant information. Default 1.0 disables the rule: internal
-    validation against the full 9-model portfolio showed the cutoff increases false
-    PSO selection and degrades mechanistic-model recovery (see README).
+    max_fractional_uptake * (final/equilibrium removal value).  Because removal
+    is monotonically increasing in time, this drops the near-equilibrium plateau
+    tail (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation),
+    which carries no rate-constant information.  Default 1.0 disables the rule:
+    internal validation against the full 9-model portfolio showed the cutoff
+    increases false PSO selection and degrades mechanistic-model recovery
+    (see README).
 
-    Returns (excluded_time_points, t_keep, rem_keep).
+    The retained set is never allowed to drop below MIN_FIT_POINTS, which keeps
+    AICc finite for the whole portfolio (up to p=3, K=p+1=4) — see the constant's
+    docstring.
+
+    Returns (excluded_time_points, t_keep, rem_keep, truncation_clamped).
+    truncation_clamped is True when the cutoff could not be fully applied: the
+    retained set is at (or below) MIN_FIT_POINTS while its tail still exceeds the
+    cutoff — including the case where no point could be dropped at all.
     """
     t_keep   = np.asarray(t_raw, dtype=float).copy()
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
-    if len(rem_keep) >= 3:
-        eq_rem = rem_keep[-1]  # final / equilibrium removal (%)
+    clamped  = False
+    if len(rem_keep) >= MIN_FIT_POINTS:
+        eq_rem = rem_keep[-1]
         cutoff = max_fractional_uptake * eq_rem
-        while len(rem_keep) >= 3 and rem_keep[-1] > cutoff:
+        while len(rem_keep) > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
             excluded.append(int(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
-    return excluded, t_keep, rem_keep
+        clamped = len(rem_keep) <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
+    return excluded, t_keep, rem_keep, clamped
