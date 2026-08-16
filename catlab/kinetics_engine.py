@@ -53,12 +53,12 @@ MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
 # jointly identifiable (the implemented dC/dt = -k_ER*K*C is literally
 # Pseudo-first-order with an extra unidentifiable parameter). Kept fitted for
 # completeness/comparison only — never eligible for best-model selection.
-# Double-Exponential (4 params) and Elovich were previously excluded too, but
+# Double-Exponential (3 params) and Elovich were previously excluded too, but
 # synthetic validation (see README) showed this was not statistically justified:
 # with 11-point curves at +/-3% noise, Elovich is recoverable at 45% (vs 0% when
 # excluded) at the cost of only ~5% false PSO->Elovich wins on noise-level close
 # calls, and Double-Exponential rarely wins anyway (AICc parsimony already
-# penalizes its 4 params).
+# penalizes its 3 params).
 BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
 
 # TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
