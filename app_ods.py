@@ -560,12 +560,13 @@ def _tab_kinetics(cfg, uploaded):
     max_frac = st.slider(
         "🛑 Max fractional uptake for auto-saturation (0.80–1.0)",
         min_value=0.80, max_value=1.0, value=1.0, step=0.01,
-        help="Simonin (2016) fractional-uptake cutoff: exclude any point whose "
-             "removal exceeds this fraction of the final/equilibrium removal value "
-             "(Simonin's original recommendation: 0.85). Default 1.0 = disabled — "
-             "internal validation against the full 9-model portfolio showed the "
-             "cutoff increases false PSO selection and degrades mechanistic-model "
-             "recovery, so only lower it for pure PFO/PSO adsorption studies.")
+        help="Tail-truncation heuristic: drops trailing points whose removal "
+             "exceeds this fraction of the LAST OBSERVED removal value. This is "
+             "NOT Simonin's (2016) criterion, which requires an independently "
+             "measured equilibrium capacity. Because the last point is its own "
+             "reference, any setting below 1.0 drops exactly one point — all "
+             "values 0.80-0.99 behave identically on a 7-point dataset. "
+             "Default 1.0 = disabled (recommended).")
     if max_frac >= 1.0:
         st.info("ℹ️ max fractional uptake = 1.0 disables auto-saturation exclusion (default).")
 

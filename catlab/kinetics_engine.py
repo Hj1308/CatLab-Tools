@@ -612,25 +612,33 @@ def akaike_weights(results, model_names=None, exclude=None):
 
 def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     """
-    Simonin (2016) fractional-uptake cutoff for auto-saturation exclusion.
+    Tail-truncation heuristic for near-equilibrium data points.
 
-    Exclude any data point whose removal/conversion exceeds
-    max_fractional_uptake * (final/equilibrium removal value).  Because removal
-    is monotonically increasing in time, this drops the near-equilibrium plateau
-    tail (fractional uptake q/q_eq >= 0.85 per Simonin's original recommendation),
-    which carries no rate-constant information.  Default 1.0 disables the rule:
-    internal validation against the full 9-model portfolio showed the cutoff
-    increases false PSO selection and degrades mechanistic-model recovery
-    (see README).
+    Drops trailing points whose removal exceeds
+    `max_fractional_uptake * rem[-1]`, where `rem[-1]` is the LAST
+    OBSERVED removal value used as a proxy for equilibrium.
 
-    The retained set is never allowed to drop below MIN_FIT_POINTS, which keeps
-    AICc finite for the whole portfolio (up to p=3, K=p+1=4) — see the constant's
-    docstring.
+    NOTE: this is NOT the criterion of Simonin (2016). Simonin defines
+    fractional uptake F(t) = q(t)/q_e against an INDEPENDENTLY MEASURED
+    equilibrium capacity q_e,exp. Using the last observed point instead
+    makes the first comparison self-referential (rem[-1] > f*rem[-1] is
+    true for any f < 1), so exactly one point is dropped regardless of
+    the value of `max_fractional_uptake`. On a 7-point grid with
+    MIN_FIT_POINTS = 6 the loop can run at most once, making all
+    settings below 1.0 behave identically.
+
+    Simonin's rationale also targets LINEARISED fitting (t/q vs t), where
+    near-equilibrium points align spuriously and inflate PSO's r^2.
+    CatLab fits non-linearly, so that failure mode does not apply here.
+
+    Default 1.0 disables the rule.
+
+    The retained set is never allowed to drop below MIN_FIT_POINTS, which
+    keeps AICc finite for the whole portfolio (up to p=3, K=p+1=4) — see
+    that constant's docstring.
 
     Returns (excluded_time_points, t_keep, rem_keep, truncation_clamped).
-    truncation_clamped is True when the cutoff could not be fully applied: the
-    retained set is at (or below) MIN_FIT_POINTS while its tail still exceeds the
-    cutoff — including the case where no point could be dropped at all.
+    truncation_clamped is True when the cutoff could not be fully applied.
     """
     t_keep   = np.asarray(t_raw, dtype=float).copy()
     rem_keep = np.asarray(rem_raw, dtype=float).copy()

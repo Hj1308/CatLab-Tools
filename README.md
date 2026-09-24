@@ -95,31 +95,45 @@ All models fitted by nonlinear least squares with C₀ locked.
 > originally proposed an **85% cutoff** to reduce artificial pseudo-second-order
 > dominance in simple two-model (PFO/PSO) adsorption studies.
 >
-> **Default = 1.0 (disabled).** We empirically validated the cutoff against
-> CatLab-Tools' full 9-model portfolio using synthetic ground-truth curves with
-> genuine multi-point saturation tails (10 model archetypes × 15 noise seeds = 150
-> synthetic curves, ±3% removal noise, plateaus ending ~89%). In this broader
-> model set the cutoff does **not** reduce false-PSO selection — it *increases* it
-> (16.7% → 30.0% as the cutoff drops from 1.0 to 0.80) while degrading
-> mechanistic-model recovery (Power-Law/L-H/Avrami) from 53.3% to 21.1%. The
-> near-equilibrium tail is precisely the information those models need to be told
-> apart from the flexible simplified models. Simonin's rationale applies where the
-> candidate set contains only PFO/PSO; it does not transfer to a portfolio that
-> also includes mechanistic ODE models. Kostoglou & Karapantsios (2022) reach the
-> same conclusion for linearized PSO analysis generally.
+> **Default = 1.0 (disabled).** Two independent reasons:
 >
-> | Fractional-uptake cutoff | Overall model recovery | PSO/PFO recovery | Mechanistic recovery (PL/LH/Avrami) | False-PSO on mechanistic data |
-> |:---:|:---:|:---:|:---:|:---:|
-> | 1.00 (disabled) | **70.7%** | 96.7% | **53.3%** | **16.7%** |
-> | 0.95 | 61.3% | 98.3% | 36.7% | 22.2% |
-> | 0.90 | 57.3% | 98.3% | 30.0% | 26.7% |
-> | 0.85 (Simonin) | 52.0% | 95.0% | 23.3% | 28.9% |
-> | 0.80 | 51.3% | 96.7% | 21.1% | 30.0% |
+> 1. Simonin's criterion targets *linearised* PFO/PSO fitting, where
+>    near-equilibrium points align spuriously in a t/q vs t plot and
+>    inflate PSO's r². CatLab fits non-linearly, so this failure mode
+>    does not arise.
+> 2. Simonin's F(t) = q(t)/q_e requires an independently measured
+>    equilibrium capacity. The current implementation substitutes the
+>    last observed point, which is not equivalent.
 >
-> Users studying pure adsorption kinetics with only PFO/PSO in play may manually
-> lower the slider toward Simonin's original 0.85; see the discussion by Simonin
-> (2016) and the broader pseudo-second-order critique of Kostoglou &
-> Karapantsios (2022).
+> Internal validation on synthetic ground-truth curves (8 archetypes ×
+> 200 seeds = 1600 fits, seed 20260812) shows that enabling the cutoff
+> degrades mechanistic-model recovery from 55.9% to 36.1% and raises
+> false-PSO selection on mechanistic data from 0.0% to 2.1%. Because
+> MIN_FIT_POINTS = 6 and typical ODS datasets have 7 points, all cutoff
+> values below 1.0 produce an identical 6-point retained set — the
+> control is effectively binary, not continuous.
+>
+> On datasets with enough points for the cutoff to act as a genuine
+> continuum (more than MIN_FIT_POINTS + 1), users studying pure
+> adsorption kinetics with only PFO/PSO in play may lower the slider.
+> Note that this remains a last-point proxy, not Simonin's F(t) =
+> q(t)/q_e; see Simonin (2016), Chem. Eng. J.,
+> DOI 10.1016/j.cej.2016.04.079.
+>
+> Both critiques of PSO target linearised fitting. Simonin (2016) shows
+> that near-equilibrium points align spuriously in a t/q vs t plot and
+> inflate PSO's r². Kostoglou & Karapantsios (2022, Colloids Interfaces
+> 6, 55, DOI 10.3390/colloids6040055) reach the same conclusion
+> independently: the apparent success of the linearised PSO form is
+> artificial, arising from overweighting the large-t behaviour of q, and
+> can make PSO appear better even than sophisticated mechanistic models.
+> Both papers recommend non-linear fitting; CatLab fits non-linearly, so
+> neither critique applies.
+>
+> CatLab also follows Kostoglou & Karapantsios' first recommendation by
+> design: it works with removal % (a function of the directly measured
+> C/C₀) rather than the calculated adsorbed mass q, avoiding propagation
+> of catalyst-mass and volume uncertainty into the fitted data.
 
 ### k ± SE and r₀
 
