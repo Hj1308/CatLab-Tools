@@ -551,7 +551,7 @@ def _get_valid_models(res, model_names):
 
 def _best_model(res, model_names):
     """
-    Best model selection for ODS kinetics with small datasets (~5 points).
+    Best model selection for ODS kinetics with small datasets (MIN_FIT_POINTS = 6 or more points).
 
     Rules (in order):
     1. Exclude models in BEST_MODEL_EXCLUDE or with non-finite AICc.
@@ -649,7 +649,7 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
         eq_rem = rem_keep[-1]
         cutoff = max_fractional_uptake * eq_rem
         while len(rem_keep) > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
-            excluded.append(int(t_keep[-1]))
+            excluded.append(float(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
         clamped = len(rem_keep) <= MIN_FIT_POINTS and rem_keep[-1] > cutoff

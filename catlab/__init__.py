@@ -9,5 +9,5 @@ from .catalyst_analytics import (
     KineticsAnalyser,
 )
 
-__version__ = "1.1.0"
+__version__ = "3.5.5"
 __author__  = "Hoda Jafari"

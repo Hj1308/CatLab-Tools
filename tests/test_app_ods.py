@@ -172,6 +172,16 @@ class TestAutoSaturationDetection:
         assert rem_keep.tolist() == rem.tolist()
         assert len(rem_keep) == MIN_FIT_POINTS
 
+    def test_fractional_time_is_reported_exactly(self):
+        """Regression: excluded times were cast with int(), so 77.5 min was
+        reported as 77.  The excluded value must equal the dropped time."""
+        T   = np.array([0.0, 10.0, 20.0, 30.0, 45.0, 60.0, 77.5])
+        REM = np.array([0.0, 20.0, 38.0, 52.0, 66.0, 76.0, 90.0])
+        excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
+            T, REM, max_fractional_uptake=0.85)
+        assert excl == [77.5]
+        assert t_keep.tolist() == [0.0, 10.0, 20.0, 30.0, 45.0, 60.0]
+
 
 class TestEdgeCaseModels:
     """Defensive coverage: Power-Law n>1 and L-H with t[0]!=0 already work;

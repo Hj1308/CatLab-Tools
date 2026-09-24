@@ -625,7 +625,7 @@ def _tab_kinetics(cfg, uploaded):
             cat_label = col.replace(" Removal (%)","").strip()
             st.info(
                 f"ℹ️ **{cat_label}**: auto-excluded saturation point(s) "
-                f"t = {auto_excl} min (removal exceeds {max_frac:.0%} of final "
+                f"t = {', '.join(f'{x:g}' for x in auto_excl)} min (removal exceeds {max_frac:.0%} of final "
                 f"removal, Simonin 2016 cutoff). Use manual exclusion above to override.")
         if clamped:
             cat_label = col.replace(" Removal (%)","").strip()
@@ -843,7 +843,7 @@ def _tab_kinetics(cfg, uploaded):
         if len(first_pos) > 0 and not np.isnan(t_half) and t_half < first_pos[0]:
             notes.append("⚠️ t½ < first data point")
         if excl:
-            notes.append(f"excl: {', '.join([str(int(x)) for x in sorted(excl)])} min")
+            notes.append(f"excl: {', '.join(f'{x:g}' for x in sorted(excl))} min")
         if add_t0 and not has_t0:
             notes.append("t=0 added")
         rows.append({
