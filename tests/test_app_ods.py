@@ -306,3 +306,96 @@ class TestArrheniusConfidenceInterval:
 
         messages = [str(c.args[0]) for c in st.warning.call_args_list]
         assert any("no valid 95% confidence interval" in m.lower() for m in messages)
+
+
+class TestInitialToFHelpers:
+    """Unit tests for the module-level initial-rate TOF helpers added in phase 2.
+
+    Reference fixture: C0 = 7.7978789769e-3 mol/L, V = 0.010 L, m = 0.05 g,
+    n_sites = 2.5e-5 mol, k = 0.025 min^-1 -> r0 = 1.949470e-4 mol/L/min.
+    """
+
+    R0 = 1.949470e-04
+    V  = 0.010
+    NS = 2.5e-5
+    M  = 0.05
+
+    def test_site_helper_arithmetic(self):
+        # r0 * V / n_sites = 1.949470e-4 * 0.010 / 2.5e-5 = 0.0779788 min^-1
+        assert round(app_ods._initial_tof_site(self.R0, self.V, self.NS), 5) == 0.07798
+
+    def test_mass_helper_arithmetic(self):
+        # r0 * V * 1000 / m = 1.949470e-4 * 0.010 * 1000 / 0.05 = 0.0389894
+        assert round(app_ods._initial_tof_mass(self.R0, self.V, self.M), 6) == 0.038989
+
+    def test_none_r0_gives_nan_never_zero(self):
+        for fn in (app_ods._initial_tof_site, app_ods._initial_tof_mass):
+            result = fn(None, self.V, self.NS)
+            assert np.isnan(result)
+            assert result != 0.0
+
+    def test_non_positive_denominators_give_nan(self):
+        assert np.isnan(app_ods._initial_tof_site(self.R0, self.V, 0.0))
+        assert np.isnan(app_ods._initial_tof_site(self.R0, self.V, -1.0))
+        assert np.isnan(app_ods._initial_tof_mass(self.R0, self.V, 0.0))
+        assert np.isnan(app_ods._initial_tof_mass(self.R0, self.V, -1.0))
+
+
+class TestInitialToFInvariance:
+    """The scientific point: the initial-rate TOF is invariant to stopping time,
+    the average is not.  Two pseudo-first-order series with the same k and C0,
+    one truncated at 50% conversion and one at 90%."""
+
+    C0 = 7.7978789769e-3
+    V  = 0.010
+    NS = 2.5e-5
+    K  = 0.025
+
+    @staticmethod
+    def _avg_tof(removal, t_last, C0, V, n_sites):
+        X_final = removal[-1] / 100.0
+        n_conv  = C0 * V * X_final
+        return n_conv / n_sites / t_last
+
+    @staticmethod
+    def _fit_r0(t, Ct, C0):
+        res  = app_ods._fit_nonlinear(t, Ct, C0)
+        best = app_ods._best_model(res, app_ods.MODEL_NAMES)
+        return res[best]["r0"]
+
+    def test_initial_tof_invariant_average_not(self):
+        t_50 = np.linspace(0.0, np.log(2.0) / self.K, 7)
+        t_90 = np.linspace(0.0, np.log(10.0) / self.K, 7)
+        Ct_50 = _first_order(t_50, self.K, self.C0)
+        Ct_90 = _first_order(t_90, self.K, self.C0)
+        rem_50 = 100.0 * (1.0 - Ct_50 / self.C0)
+        rem_90 = 100.0 * (1.0 - Ct_90 / self.C0)
+
+        r0_50 = self._fit_r0(t_50, Ct_50, self.C0)
+        r0_90 = self._fit_r0(t_90, Ct_90, self.C0)
+
+        tof0_50 = app_ods._initial_tof_site(r0_50, self.V, self.NS)
+        tof0_90 = app_ods._initial_tof_site(r0_90, self.V, self.NS)
+
+        # initial-rate TOF agrees to within 1 %
+        assert abs(tof0_50 - tof0_90) / abs(tof0_50) < 0.01
+
+        avg_50 = self._avg_tof(rem_50, t_50[-1], self.C0, self.V, self.NS)
+        avg_90 = self._avg_tof(rem_90, t_90[-1], self.C0, self.V, self.NS)
+
+        # average TOF differs by more than 50 %
+        assert abs(avg_50 - avg_90) / min(avg_50, avg_90) > 0.50
+
+    def test_models_without_initial_rate_give_nan(self):
+        t  = np.array([0.0, 10, 20, 30, 45, 60, 90])
+        Ct = _first_order(t, self.K, self.C0)
+        res = app_ods._fit_nonlinear(t, Ct, self.C0)
+
+        no_r0 = [m for m in app_ods.MODEL_NAMES
+                 if m in res and res[m].get("converged", True)
+                 and res[m].get("r0") is None]
+        assert no_r0, "expected at least one converged model with r0=None"
+
+        for m in no_r0:
+            val = app_ods._initial_tof_site(res[m].get("r0"), self.V, self.NS)
+            assert np.isnan(val), f"{m} r0 should yield nan, got {val}"

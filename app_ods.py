@@ -186,6 +186,29 @@ def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1, ppms_volumetric
     return C0_compound, C0_S
 
 
+def _initial_tof_site(r0, V_L, n_sites_mol):
+    """Initial-rate turnover frequency, min^-1.
+
+    TOF_0 = r0 * V / n_sites, with r0 in mol/L/min, V in L and n_sites in mol.
+    Returns nan when r0 is None (the selected model has no defined initial rate)
+    or when n_sites_mol is not strictly positive.
+    """
+    if r0 is None or n_sites_mol <= 0:
+        return float("nan")
+    return r0 * V_L / n_sites_mol
+
+
+def _initial_tof_mass(r0, V_L, m_g):
+    """Initial-rate mass-normalised activity, mmol/g/min.
+
+    TOF_mass,0 = r0 * V * 1000 / m, with r0 in mol/L/min, V in L and m in g.
+    Returns nan when r0 is None or when m_g is not strictly positive.
+    """
+    if r0 is None or m_g <= 0:
+        return float("nan")
+    return r0 * V_L * 1000.0 / m_g
+
+
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
     try:
@@ -1116,6 +1139,7 @@ def _tab_ton_tof(cfg, uploaded):
     t  = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]; V = cfg["V_fuel"]; m = cfg["m_cat"]
     if C0 is None: st.error("C₀ conversion failed."); return
+    model_names = MODEL_NAMES
 
     # ── Catalyst type selector ────────────────────────────────────
     cat_type = st.radio(
@@ -1131,7 +1155,8 @@ def _tab_ton_tof(cfg, uploaded):
         st.markdown("""
 **Definitions (site-based):**
 - **TON** = n_substrate_converted / n_active_sites &nbsp;(dimensionless)
-- **TOF** (min⁻¹) = TON / t_reaction
+- **TOF_avg** (min⁻¹) = TON / t_reaction — the average over the whole run, which depends on when the run was stopped
+- **TOF₀** (min⁻¹) = r₀ · V / n_sites — the initial-rate TOF, which does not depend on stopping time
 - **n_active_sites** from direct measurement or BET + ρ_site
         """)
         method_choice = st.radio(
@@ -1189,6 +1214,7 @@ def _tab_ton_tof(cfg, uploaded):
         if n_sites_mol <= 0:
             st.error("n_active_sites = 0. Check your inputs."); return
         rows = []
+        chart_data = []
         for col in removal_cols:
             removal = df[col].dropna().values[:len(t)].astype(float)
             cat_label = col.replace(" Removal (%)","").strip()
@@ -1197,25 +1223,54 @@ def _tab_ton_tof(cfg, uploaded):
             t_rxn   = t[-1]
             ton = n_conv / n_sites_mol
             tof = ton / t_rxn if t_rxn > 0 else float("nan")
+
+            Ct  = C0 * (1 - removal / 100.0)
+            res = _fit_nonlinear(t, Ct, C0)
+            best = _best_model(res, model_names)
+            r0   = res[best].get("r0") if (best and res[best].get("converged", True)) else None
+            tof0 = _initial_tof_site(r0, V, n_sites_mol)
+            model_label = best if best else "—"
+            tof0_str = (f"{tof0:.5f}" if not np.isnan(tof0)
+                        else f"N/A — {model_label} has no defined initial rate")
+            tof0_h_str = (f"{tof0*60:.3f}" if not np.isnan(tof0)
+                          else f"N/A — {model_label} has no defined initial rate")
+
             rows.append({
-                "Catalyst":       cat_label,
-                "X_final (%)":    round(removal[-1], 1),
-                "n_conv (µmol)":  round(n_conv * 1e6, 3),
-                "n_sites (µmol)": round(n_sites_mol * 1e6, 3),
-                "TON":            round(ton, 3),
-                "TOF (min⁻¹)":    f"{tof:.5f}" if not np.isnan(tof) else "N/A",
-                "TOF (h⁻¹)":      f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
+                "Catalyst":          cat_label,
+                "X_final (%)":       round(removal[-1], 1),
+                "n_conv (µmol)":     round(n_conv * 1e6, 3),
+                "n_sites (µmol)":    round(n_sites_mol * 1e6, 3),
+                "TON":               round(ton, 3),
+                "TOF_avg (min⁻¹)":   f"{tof:.5f}" if not np.isnan(tof) else "N/A",
+                "TOF_avg (h⁻¹)":     f"{tof*60:.3f}" if not np.isnan(tof) else "N/A",
+                "Model (AICc)":      model_label,
+                "TOF_0 (min⁻¹)":     tof0_str,
+                "TOF_0 (h⁻¹)":       tof0_h_str,
             })
+            if not np.isnan(tof0):
+                chart_data.append((cat_label, tof0 * 60.0))
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        if len(rows) > 1:
+        st.caption("The initial-rate TOF_0 is fitted from the raw uploaded series "
+                   "(AICc-selected model) and does not honour Tab 1's manual or "
+                   "auto-saturation exclusions.")
+        if len(chart_data) > 1:
             fig, ax = plt.subplots(figsize=(7, 4))
-            cats = [r["Catalyst"] for r in rows]
-            tofs = [float(r["TOF (h⁻¹)"]) if r["TOF (h⁻¹)"] != "N/A" else 0 for r in rows]
+            cats = [c for c, _ in chart_data]
+            tofs = [v for _, v in chart_data]
             bars = ax.bar(cats, tofs, color=COLORS[:len(cats)],
                           edgecolor="black", linewidth=0.8)
             ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=9)
-            ax.set_ylabel("TOF (h⁻¹)"); ax.set_title("Turnover Frequency Comparison")
+            ax.set_ylabel("TOF₀ (h⁻¹)")
+            ax.set_title("Initial Turnover Frequency (AICc-selected model)")
             fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+            plotted = {c for c, _ in chart_data}
+            omitted = [r["Catalyst"] for r in rows if r["Catalyst"] not in plotted]
+            if omitted:
+                st.caption("Omitted (no defined initial rate): "
+                           + ", ".join(omitted))
+        elif not chart_data:
+            st.info("No catalyst has a defined initial-rate TOF_0 — "
+                    "all selected models lack an initial rate, so the chart is skipped.")
 
     # ════════════════════════════════════════════════════════════════
     # OPTION B — Mass-normalized TOF for carbon-based catalysts
@@ -1229,9 +1284,10 @@ BET area includes pores inaccessible to DBT. Mass-normalized TOF is the
 standard in the ODS literature for carbon-based catalysts.
 
 **Definitions:**
-- **TOF_mass** (mmol·g⁻¹·min⁻¹) = n_DBT_removed / (m_cat × t_reaction)
-- **TOF_BET** (mmol·m⁻²·min⁻¹) = TOF_mass / BET_area  *(if BET available)*
-- **r₀/m** (mmol·g⁻¹·min⁻¹) = initial rate per gram catalyst
+- **TOF_mass_avg** (mmol·g⁻¹·min⁻¹) = n_DBT_removed / (m_cat × t_reaction) — average over the whole run, depends on stopping time
+- **TOF_BET_avg** (mmol·m⁻²·min⁻¹) = TOF_mass_avg / BET_area  *(if BET available)*
+- **r₀/m** (mmol·g⁻¹·min⁻¹) = initial rate per gram catalyst — does not depend on stopping time
+- **r₀/S_BET** (mmol·m⁻²·min⁻¹) = (r₀/m) / BET_area  *(if BET available)*
         """)
 
         # ── Try to read BET from Excel sheet ─────────────────────
@@ -1292,6 +1348,7 @@ standard in the ODS literature for carbon-based catalysts.
         st.markdown("### 📋 Mass-Normalized TOF Results")
 
         rows = []
+        chart_data = []
         for col in removal_cols:
             removal  = df[col].dropna().values[:len(t)].astype(float)
             cat_label = col.replace(" Removal (%)","").strip()
@@ -1302,56 +1359,113 @@ standard in the ODS literature for carbon-based catalysts.
             # TOF_mass = n_conv (mmol) / (m_cat(g) × t(min))
             tof_mass_mmol = (n_conv * 1000) / (m * t_rxn) if (m > 0 and t_rxn > 0) else float("nan")
 
+            # Initial-rate per gram catalyst, from the AICc-selected fit
+            Ct  = C0 * (1 - removal / 100.0)
+            res = _fit_nonlinear(t, Ct, C0)
+            best = _best_model(res, model_names)
+            r0   = res[best].get("r0") if (best and res[best].get("converged", True)) else None
+            r0_m = _initial_tof_mass(r0, V, m)
+            model_label = best if best else "—"
+            r0_m_str = (f"{r0_m:.6f}" if not np.isnan(r0_m)
+                        else f"N/A — {model_label} has no defined initial rate")
+
             # TOF_BET
             bet_val = bet_inputs[col]
             if bet_val > 0:
                 tof_bet = tof_mass_mmol / bet_val   # mmol/(m²·min)
+                r0_bet  = r0_m / bet_val if not np.isnan(r0_m) else float("nan")
             else:
                 tof_bet = float("nan")
+                r0_bet  = float("nan")
 
             row = {
-                "Catalyst":                   cat_label,
-                "X_final (%)":                round(removal[-1], 1),
-                "n_conv (µmol)":              round(n_conv * 1e6, 3),
-                "TOF_mass (mmol·g⁻¹·min⁻¹)": f"{tof_mass_mmol:.5f}" if not np.isnan(tof_mass_mmol) else "N/A",
-                "TOF_mass (µmol·g⁻¹·min⁻¹)": f"{tof_mass_mmol*1000:.3f}" if not np.isnan(tof_mass_mmol) else "N/A",
-                "TOF_mass (mmol·g⁻¹·h⁻¹)":   f"{tof_mass_mmol*60:.4f}" if not np.isnan(tof_mass_mmol) else "N/A",
-                "BET (m²/g)":                 round(bet_val, 1) if bet_val > 0 else "—",
-                "TOF_BET (mmol·m⁻²·min⁻¹)":  f"{tof_bet:.6f}" if not np.isnan(tof_bet) else "—",
+                "Catalyst":                         cat_label,
+                "X_final (%)":                      round(removal[-1], 1),
+                "n_conv (µmol)":                    round(n_conv * 1e6, 3),
+                "TOF_mass_avg (mmol·g⁻¹·min⁻¹)":   f"{tof_mass_mmol:.5f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "TOF_mass_avg (µmol·g⁻¹·min⁻¹)":   f"{tof_mass_mmol*1000:.3f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "TOF_mass_avg (mmol·g⁻¹·h⁻¹)":     f"{tof_mass_mmol*60:.4f}" if not np.isnan(tof_mass_mmol) else "N/A",
+                "Model (AICc)":                     model_label,
+                "r₀/m (mmol·g⁻¹·min⁻¹)":           r0_m_str,
+                "BET (m²/g)":                       round(bet_val, 1) if bet_val > 0 else "—",
+                "TOF_BET_avg (mmol·m⁻²·min⁻¹)":    f"{tof_bet:.6f}" if not np.isnan(tof_bet) else "—",
+                "r₀/S_BET (mmol·m⁻²·min⁻¹)":       f"{r0_bet:.6f}" if not np.isnan(r0_bet) else "—",
             }
             rows.append(row)
+            if not np.isnan(r0_m):
+                chart_data.append((cat_label, r0_m))
 
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.caption("The initial-rate r₀/m and r₀/S_BET are fitted from the raw "
+                   "uploaded series (AICc-selected model) and do not honour Tab 1's "
+                   "manual or auto-saturation exclusions.")
+
+        # ── Bar chart: initial rate r₀/m ───────────────────────────
+        if chart_data:
+            fig0, ax0 = plt.subplots(figsize=(6, 4))
+            cats0 = [c for c, _ in chart_data]
+            vals0 = [v for _, v in chart_data]
+            bars0 = ax0.bar(cats0, vals0, color=COLORS[:len(cats0)],
+                            edgecolor="black", linewidth=0.8)
+            ax0.bar_label(bars0, fmt="%.4f", padding=2, fontsize=8)
+            ax0.set_ylabel("r₀/m (mmol·g⁻¹·min⁻¹)")
+            ax0.set_title("Initial-rate mass-normalised activity (AICc-selected model)")
+            ax0.tick_params(axis='x', rotation=30)
+            fig0.tight_layout(); st.pyplot(fig0); plt.close(fig0)
+            plotted = {c for c, _ in chart_data}
+            omitted = [r["Catalyst"] for r in rows if r["Catalyst"] not in plotted]
+            if omitted:
+                st.caption("Omitted (no defined initial rate): "
+                           + ", ".join(omitted))
+        else:
+            st.info("No catalyst has a defined initial-rate r₀/m — "
+                    "all selected models lack an initial rate, so the chart is skipped.")
 
         # ── Bar charts ────────────────────────────────────────────
-        cats = [r["Catalyst"] for r in rows]
-
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            vals = [float(r["TOF_mass (µmol·g⁻¹·min⁻¹)"]) if r["TOF_mass (µmol·g⁻¹·min⁻¹)"] != "N/A" else 0
-                    for r in rows]
-            bars = ax.bar(cats, vals, color=COLORS[:len(cats)],
-                          edgecolor="black", linewidth=0.8)
-            ax.bar_label(bars, fmt="%.2f", padding=2, fontsize=8)
-            ax.set_ylabel("TOF_mass (µmol·g⁻¹·min⁻¹)")
-            ax.set_title("Mass-normalized TOF")
-            ax.tick_params(axis='x', rotation=30)
-            fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+            mass_rows = [r for r in rows
+                         if r["TOF_mass_avg (µmol·g⁻¹·min⁻¹)"] != "N/A"]
+            if mass_rows:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                cats = [r["Catalyst"] for r in mass_rows]
+                vals = [float(r["TOF_mass_avg (µmol·g⁻¹·min⁻¹)"]) for r in mass_rows]
+                bars = ax.bar(cats, vals, color=COLORS[:len(cats)],
+                              edgecolor="black", linewidth=0.8)
+                ax.bar_label(bars, fmt="%.2f", padding=2, fontsize=8)
+                ax.set_ylabel("TOF_mass_avg (µmol·g⁻¹·min⁻¹)")
+                ax.set_title("Mass-normalized TOF (average)")
+                ax.tick_params(axis='x', rotation=30)
+                fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+                plotted = {r["Catalyst"] for r in mass_rows}
+                omitted = [r["Catalyst"] for r in rows
+                           if r["Catalyst"] not in plotted]
+                if omitted:
+                    st.caption("Omitted (value unavailable): "
+                               + ", ".join(omitted))
+            else:
+                st.info("No catalyst has a defined TOF_mass_avg — "
+                        "chart skipped.")
 
         with col_chart2:
-            bet_rows = [r for r in rows if r["TOF_BET (mmol·m⁻²·min⁻¹)"] != "—"]
+            bet_rows = [r for r in rows if r["TOF_BET_avg (mmol·m⁻²·min⁻¹)"] != "—"]
             if bet_rows:
                 fig2, ax2 = plt.subplots(figsize=(6, 4))
                 cats2 = [r["Catalyst"] for r in bet_rows]
-                vals2 = [float(r["TOF_BET (mmol·m⁻²·min⁻¹)"]) for r in bet_rows]
+                vals2 = [float(r["TOF_BET_avg (mmol·m⁻²·min⁻¹)"]) for r in bet_rows]
                 bars2 = ax2.bar(cats2, vals2, color=COLORS[:len(cats2)],
                                 edgecolor="black", linewidth=0.8)
                 ax2.bar_label(bars2, fmt="%.5f", padding=2, fontsize=8)
-                ax2.set_ylabel("TOF_BET (mmol·m⁻²·min⁻¹)")
-                ax2.set_title("BET-normalized TOF")
+                ax2.set_ylabel("TOF_BET_avg (mmol·m⁻²·min⁻¹)")
+                ax2.set_title("BET-normalized TOF (average)")
                 ax2.tick_params(axis='x', rotation=30)
                 fig2.tight_layout(); st.pyplot(fig2); plt.close(fig2)
+                plotted = {r["Catalyst"] for r in bet_rows}
+                omitted = [r["Catalyst"] for r in rows
+                           if r["Catalyst"] not in plotted]
+                if omitted:
+                    st.caption("Omitted (no BET area): "
+                               + ", ".join(omitted))
             else:
                 st.info("Enter BET values above to see TOF_BET chart.")
 
