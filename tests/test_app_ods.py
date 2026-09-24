@@ -409,3 +409,32 @@ class TestInitialToFInvariance:
         for m in no_r0:
             val = app_ods._initial_tof_site(res[m].get("r0"), self.V, self.NS)
             assert np.isnan(val), f"{m} r0 should yield nan, got {val}"
+
+
+class TestLinearizationTabNoRanking:
+    """Regression: Tab 2 used to crown a 'Best Model by Linear R²' across
+    linearisations with different dependent variables (C, ln(C0/C), 1/C).
+    It must now show R² as a diagnostic only, with no ranking."""
+
+    def test_tab2_shows_r2_table_without_best_model(self, monkeypatch):
+        st = MagicMock()
+        monkeypatch.setattr(app_ods, "st", st)
+        df = pd.DataFrame({
+            "Time (min)": [0, 10, 20, 30, 45, 60, 90],
+            "Cat-A Removal (%)": [0, 18, 33, 45, 58, 68, 80],
+        })
+        monkeypatch.setattr(app_ods, "_load_kinetic_data",
+                            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]))
+
+        app_ods._tab_linearization({"C0": 0.015}, MagicMock())
+
+        texts = [str(c.args[0]) for c in st.markdown.call_args_list if c.args]
+        texts += [str(c.args[0]) for c in st.info.call_args_list if c.args]
+        assert not any("🏆" in t or "best model" in t.lower() for t in texts)
+
+        tables = [c.args[0] for c in st.dataframe.call_args_list]
+        assert len(tables) == 1
+        cols = list(tables[0].columns)
+        assert cols[0] == "Catalyst"
+        assert not any("best" in str(c).lower() for c in cols)
+        assert {"Zero-order", "Pseudo-first", "Pseudo-second-order", "Elovich"} <= set(cols)

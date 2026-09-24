@@ -577,7 +577,8 @@ def _tab_kinetics(cfg, uploaded):
     t_pre_per_cat     = {}
     rem_pre_per_cat   = {}
 
-    # Auto-saturation: user-adjustable Simonin (2016) fractional-uptake cutoff.
+    # Auto-saturation: user-adjustable tail-truncation heuristic (NOT Simonin's
+    # 2016 criterion — see the slider help and _auto_saturation_exclusions).
     # Points whose removal exceeds max_fractional_uptake × final removal are
     # excluded before fitting (see _auto_saturation_exclusions).
     max_frac = st.slider(
@@ -626,7 +627,7 @@ def _tab_kinetics(cfg, uploaded):
             st.info(
                 f"ℹ️ **{cat_label}**: auto-excluded saturation point(s) "
                 f"t = {', '.join(f'{x:g}' for x in auto_excl)} min (removal exceeds {max_frac:.0%} of final "
-                f"removal, Simonin 2016 cutoff). Use manual exclusion above to override.")
+                f"removal; tail-truncation heuristic, not Simonin 2016). Use manual exclusion above to override.")
         if clamped:
             cat_label = col.replace(" Removal (%)","").strip()
             st.warning(
@@ -871,8 +872,8 @@ def _tab_kinetics(cfg, uploaded):
         with st.expander("🔎 Auto-saturation details", expanded=True):
             st.caption(
                 f"Points dropped by the auto-saturation rule (removal > "
-                f"{max_frac:.0%} of final/equilibrium removal, Simonin 2016 "
-                "fractional-uptake cutoff), and the best-model result "
+                f"{max_frac:.0%} of the last observed removal; tail-truncation "
+                "heuristic, not Simonin's 2016 criterion), and the best-model result "
                 "with vs without that exclusion. Best model = AICc selection, R² shown.")
             det_rows = []
             for col in all_results:
@@ -1035,51 +1036,26 @@ def _tab_linearization(cfg, uploaded):
     if not summary_rows:
         return
 
-    # ── Build pivot: best model per catalyst (highest linear R²) ──
+    # ── R² per linearised plot — diagnostic only, no ranking ──
+    # The plots use different dependent variables (C, ln(C₀/C), 1/C), so their
+    # R² values are not comparable across models and are not used to select a
+    # model. Model selection is Tab 1 (non-linear fit to C(t), AICc).
     df_sum = pd.DataFrame(summary_rows)
-
-    # Exclude same models as Tab 1 from "best" selection
-    df_sum_eligible = df_sum[~df_sum["Model"].isin(
-        {m.split("  |")[0].strip() for m in [
-            "Elovich", "Double-Exponential"]}
-    )]
-    if df_sum_eligible.empty:
-        df_sum_eligible = df_sum  # fallback if all excluded
-
-    # For each catalyst find the model with max R² (from eligible models only)
-    best_linear = (
-        df_sum_eligible.loc[df_sum_eligible.groupby("Catalyst")["R²"].idxmax()]
-        .set_index("Catalyst")[["Model", "R²"]]
-        .rename(columns={"Model": "Best model (linear R²)",
-                         "R²":    "Best R²"})
-    )
-
-    # Pivot so each row = one catalyst, columns = models
     df_pivot = df_sum.pivot_table(
         index="Catalyst", columns="Model", values="R²"
     ).reset_index()
     df_pivot.columns.name = None
 
-    # Merge best-model column
-    df_pivot = df_pivot.merge(best_linear, on="Catalyst", how="left")
-
-    # Reorder: Catalyst | Best model | Best R² | individual model R²s
-    model_cols = [c for c in df_pivot.columns
-                  if c not in ("Catalyst", "Best model (linear R²)", "Best R²")]
-    df_pivot = df_pivot[["Catalyst", "Best model (linear R²)", "Best R²"] + model_cols]
-
     st.markdown("---")
-    st.markdown("### 🏆 Best Model by Linear R²")
-    st.dataframe(best_linear.reset_index(), use_container_width=True, hide_index=True)
-
-    st.markdown("### 📋 All Models — R² Comparison")
+    st.markdown("### 📋 R² of each linearised plot (diagnostic, not a selection criterion)")
     st.dataframe(df_pivot, use_container_width=True, hide_index=True)
 
     st.info(
-        "**How to interpret:** Use **Tab 1 (AICc + parsimony)** as the primary "
-        "model selection. Use **Tab 2 (linear R²)** as supporting visual evidence. "
-        "With only 5–6 points, **Pseudo-second-order** and **L-H** are generally "
-        "more physically meaningful than Elovich or Power-Law."
+        "**How to interpret:** these plots use different dependent variables "
+        "(C, ln(C₀/C), 1/C), so their R² values are **not comparable across "
+        "models** and no model is ranked here. Use them as a visual check of "
+        "each linear form. Model selection is done in **Tab 1** (non-linear fit "
+        "to C(t), AICc)."
     )
 
 
