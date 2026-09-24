@@ -260,3 +260,47 @@ class TestRunODSAnalysis:
         )
         assert len(df) == 1
         assert df.loc[0, "R2_first"] > 0.90
+
+
+# ─────────────────────────────────────────────────────────────────
+# Roadmap phase 1 — the CLI path now reports the AICc selection
+# instead of R2 for three of nine models.  The pre-existing R2 keys
+# stay in place as diagnostics; these tests pin both halves.
+# ─────────────────────────────────────────────────────────────────
+from catlab.kinetics_engine import (
+    _best_model, akaike_weights, MODEL_NAMES,
+)
+
+
+class TestAiccReporting:
+    T = np.array([0, 10, 20, 30, 45, 60, 90], float)
+
+    def test_reports_aicc_selection(self):
+        Ct = _first_order(self.T, 0.02, C0)
+        r = _fit_kinetics(self.T, Ct, C0)
+        assert r["Best Model (AICc)"] == "Pseudo-first"
+        assert np.isfinite(r["AICc_best"])
+        assert r["dAICc_best"] == 0.0
+        assert 0.0 < r["w_best"] <= 1.0
+
+    def test_legacy_keys_all_survive(self):
+        """The R2-only contract other callers rely on must not break."""
+        Ct = _first_order(self.T, 0.02, C0)
+        r = _fit_kinetics(self.T, Ct, C0)
+        for key in ("K0 (mol/L/min)", "R2_zero", "Kapp (1/min)", "R2_first",
+                    "K2 (L/mol/min)", "R2_second", "t_half (min)",
+                    "_t", "_y0", "_y1", "_y2", "_C0", "_C"):
+            assert key in r, f"legacy key {key!r} disappeared"
+
+    def test_per_model_aicc_and_weights_exposed(self):
+        Ct = _first_order(self.T, 0.02, C0)
+        r = _fit_kinetics(self.T, Ct, C0)
+        assert set(r["_aicc_all"]) == set(MODEL_NAMES)
+        assert r["Best Model (AICc)"] in r["_weights"]
+        assert sum(v["weight"] for v in r["_weights"].values()) == pytest.approx(1.0, abs=1e-6)
+
+    def test_partial_results_dict_does_not_raise(self):
+        """Regression for the unguarded res[m] in _get_valid_models."""
+        partial = {"Pseudo-first": {"aicc": -10.0}, "Zero-order": {"aicc": -5.0}}
+        assert _best_model(partial, MODEL_NAMES) == "Pseudo-first"
+        assert akaike_weights(partial, model_names=MODEL_NAMES) != {}

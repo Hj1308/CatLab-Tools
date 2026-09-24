@@ -546,7 +546,8 @@ def _fit_nonlinear(time, Ct, C0):
 
 
 def _get_valid_models(res, model_names):
-    return {m: res[m] for m in model_names if res[m].get("converged", True)}
+    return {m: res[m] for m in model_names
+            if m in res and res[m].get("converged", True)}
 
 def _best_model(res, model_names):
     """

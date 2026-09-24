@@ -104,3 +104,87 @@ class TestHelpers:
     def test_toc(self):          assert abs(calc_toc_removal(85.0, 12.0) - 85.88) < 0.1
     def test_toc_nan(self):
         import math; assert math.isnan(calc_toc_removal(0.0, 5.0))
+
+
+# ─────────────────────────────────────────────────────────────────
+# Roadmap phase 1 — one model-selection criterion across the repo.
+# Before this change, KineticsAnalyser.best_fit() selected by max(R2)
+# over 4 models while app_ods.py selected by AICc over 9.  On the L-H
+# fixture below the package API returned "Zero-order" while the app
+# returned "L-H" with an Akaike weight of ~0.9997 (Zero-order sat at
+# dAICc = 27.52).  These tests pin the two interfaces together.
+# ─────────────────────────────────────────────────────────────────
+from scipy.integrate import odeint
+
+from catlab.kinetics_engine import (
+    _best_model, _fit_nonlinear, akaike_weights, MODEL_NAMES,
+)
+
+
+def _lh_fixture():
+    """Synthetic Langmuir-Hinshelwood curve, 2% multiplicative noise."""
+    info = SampleInfo("X", "desulfurization", 0.05, 0.010, 250.0, "ppmS",
+                      active_sites_mmol_g=0.3)
+    c0 = info.c0_mmol_L
+    t = np.array([0, 5, 10, 20, 30, 45, 60, 90, 120], float)
+    sol = odeint(lambda c, tt: [-0.25 * 0.9 * max(c[0], 0)
+                                / (1 + 0.9 * max(c[0], 0))], [c0], t).flatten()
+    rng = np.random.default_rng(7)
+    return info, c0, t, sol * (1 + rng.normal(0, 0.02, sol.size))
+
+
+class TestUnifiedModelSelection:
+    def test_package_api_agrees_with_app_selection(self):
+        """best_fit() must return exactly what the app's _best_model returns."""
+        info, c0, t, c = _lh_fixture()
+        pkg = KineticsAnalyser(t, c, info).best_fit()["model"]
+        app = _best_model(_fit_nonlinear(t, c, c0), MODEL_NAMES)
+        assert pkg == app, f"package reported {pkg!r}, app reported {app!r}"
+
+    def test_lh_curve_is_reported_as_lh(self):
+        """The 4-model R2 rule could never reach L-H; the AICc rule must."""
+        info, c0, t, c = _lh_fixture()
+        assert KineticsAnalyser(t, c, info).best_fit()["model"] == "L-H"
+        w = akaike_weights(_fit_nonlinear(t, c, c0), model_names=MODEL_NAMES)
+        assert w["L-H"]["weight"] == pytest.approx(0.9997, abs=5e-3)
+        assert w["Zero-order"]["delta_aicc"] > 20.0
+
+    def test_best_fit_contract(self):
+        info, c0, t, c = _lh_fixture()
+        b = KineticsAnalyser(t, c, info).best_fit()
+        for key in ("model", "R2", "aicc", "delta_aicc", "weight",
+                    "n_params", "selection_criterion"):
+            assert key in b, f"missing key {key!r}"
+        assert b["selection_criterion"] == "AICc"
+        assert b["delta_aicc"] == 0.0
+        assert 0.0 < b["weight"] <= 1.0
+        assert b["n_params"] >= 1
+
+    def test_lagergren_is_not_a_selection_candidate(self):
+        """The linearised log(qe-qt) fit is on a different dependent
+        variable, so it is not a valid AICc competitor.  It must stay
+        available as a diagnostic but never be selected."""
+        info, c0, t, c = _lh_fixture()
+        an = KineticsAnalyser(t, c, info)
+        assert an.best_fit()["model"] in MODEL_NAMES
+        assert an.best_fit()["model"] != "Pseudo-first-order"
+        assert an.fit_pseudo_first_order()["model"] == "Pseudo-first-order"
+
+    def test_all_fits_failed(self, monkeypatch):
+        info, c0, t, c = _lh_fixture()
+        dead = {m: {"converged": False} for m in MODEL_NAMES}
+        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear",
+                            lambda *a, **kw: dead)
+        b = KineticsAnalyser(t, c, info).best_fit()
+        assert b["model"] == "All fits failed"
+        assert b["R2"] == 0.0
+        assert b["selection_criterion"] == "AICc"
+
+    def test_partial_results_dict_does_not_raise(self):
+        """_get_valid_models used to index res[m] unguarded, raising
+        KeyError on a results dict that omits a model."""
+        info, c0, t, c = _lh_fixture()
+        full = _fit_nonlinear(t, c, c0)
+        partial = {k: full[k] for k in ("Pseudo-first", "Zero-order")}
+        assert _best_model(partial, MODEL_NAMES) in ("Pseudo-first", "Zero-order")
+        assert akaike_weights(partial, model_names=MODEL_NAMES) != {}

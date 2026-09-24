@@ -17,7 +17,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Optional
 import os
-from .kinetics_engine import _fit_nonlinear, _to_mol_L, COLORS, MARKERS
+from .kinetics_engine import (_fit_nonlinear, _to_mol_L, COLORS, MARKERS,
+                              _best_model, akaike_weights, MODEL_NAMES, N_PARAMS)
 
 
 # -------------------------------------------------
@@ -82,7 +83,16 @@ def _fit_kinetics(time: np.ndarray, Ct_mol_L: np.ndarray, C0_mol_L: float) -> di
     y1 = np.log(C0 / np.clip(C, 1e-15, None))
     y2 = (1.0 / np.clip(C, 1e-15, None)) - (1.0 / C0)
 
+    best = _best_model(res, MODEL_NAMES)
+    w    = akaike_weights(res, model_names=MODEL_NAMES)
+    bw   = w.get(best, {}) if best else {}
     return {
+        "Best Model (AICc)": best if best else "All fits failed",
+        "AICc_best"        : res.get(best, {}).get("aicc", float("nan")) if best else float("nan"),
+        "dAICc_best"       : bw.get("delta_aicc", float("nan")),
+        "w_best"           : bw.get("weight", float("nan")),
+        "_aicc_all"        : {m: res.get(m, {}).get("aicc", float("nan")) for m in MODEL_NAMES},
+        "_weights"         : w,
         "K0 (mol/L/min)"  : round(k0,   8),
         "R2_zero"         : R2_0,
         "Kapp (1/min)"    : round(kapp, 6),
@@ -157,6 +167,9 @@ def run_ods_analysis(
             "K2 (L/mol/min)"         : fit["K2 (L/mol/min)"],
             "R2_second"              : fit["R2_second"],
             "t_half (min)"           : fit["t_half (min)"],
+            "Best Model (AICc)"      : fit["Best Model (AICc)"],
+            "AICc"                   : fit["AICc_best"],
+            "w"                      : fit["w_best"],
         })
         fits_data[sheet] = fit
 

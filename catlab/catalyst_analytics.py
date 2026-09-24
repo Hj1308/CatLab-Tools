@@ -20,7 +20,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from dataclasses import dataclass
 from typing import Optional
-from .kinetics_engine import _fit_nonlinear
+from .kinetics_engine import (_fit_nonlinear, _best_model, akaike_weights,
+                              MODEL_NAMES, N_PARAMS)
 
 # ─────────────────────────────────────────
 # 1. UNIT CONVERTER (delegates to shared engine)
@@ -175,9 +176,33 @@ class KineticsAnalyser:
                 "qe (mmol/g)": round(np.exp(intercept), 5), "R2": round(r**2, 5)}
 
     def best_fit(self) -> dict:
-        results = [self.fit_zero_order(), self.fit_first_order(),
-                   self.fit_second_order(), self.fit_pseudo_first_order()]
-        return max(results, key=lambda r: r["R2"])
+        """Select the best model by AICc over the full engine portfolio.
+
+        Selection uses the same criterion and the same candidate set as the
+        Streamlit app (`kinetics_engine._best_model`), so the package API and
+        the app cannot disagree on the reported model. The Lagergren
+        pseudo-first-order fit from `fit_pseudo_first_order()` is a
+        linearised fit on a different dependent variable and is therefore
+        not a valid AICc competitor; it remains available as a diagnostic.
+        """
+        res  = self._nonlinear
+        name = _best_model(res, MODEL_NAMES)
+        if name is None:
+            return {"model": "All fits failed", "R2": 0.0,
+                    "aicc": float("nan"), "delta_aicc": float("nan"),
+                    "weight": float("nan"), "n_params": None,
+                    "selection_criterion": "AICc"}
+        w = akaike_weights(res, model_names=MODEL_NAMES).get(name, {})
+        r = res[name]
+        return {
+            "model":  name,
+            "R2":     round(float(r.get("R2", 0.0)), 5),
+            "aicc":   r.get("aicc", float("nan")),
+            "delta_aicc": w.get("delta_aicc", float("nan")),
+            "weight":     w.get("weight", float("nan")),
+            "n_params":   N_PARAMS.get(name),
+            "selection_criterion": "AICc",
+        }
 
     def calc_tof_val(self, time_h: float) -> Optional[float]:
         if self.info.active_sites_mmol_g is None: return None
