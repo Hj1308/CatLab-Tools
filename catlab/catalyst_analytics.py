@@ -1,7 +1,7 @@
 # catlab/catalyst_analytics.py
 # CatLab-Tools — Catalyst Reaction Analysis Suite
 # Author: Hoda Jafari | github.com/Hj1308
-# Version: 1.1.0
+# Version: see catlab.__version__
 #
 # Modules:
 #   1. Unit Converter        — ppmS, ppm, mg/L, g/L, mmol/L, mol/L

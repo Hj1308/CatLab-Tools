@@ -34,8 +34,9 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          # Extract section from CHANGELOG.md matching the version
-          awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | head -n -1 > release_body.md
+          # Extract the "## vX.Y.Z (date)" section from CHANGELOG.md, up to the next "## " heading
+          awk -v v="## $VERSION" 'index($0, v" ")==1 || $0==v {f=1; next} f && /^## /{exit} f' CHANGELOG.md > release_body.md
+          test -s release_body.md || { echo "No CHANGELOG section for $VERSION"; exit 1; }
           cat release_body.md
 
       - name: Create GitHub Release

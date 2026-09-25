@@ -1,5 +1,48 @@
 # Changelog
 
+## v3.6.0 (2026-09-25)
+
+### Fixed
+- **One model-selection rule.** `KineticsAnalyser.best_fit()` selected by
+  max(R²) over four models while the app selected by AICc over nine, so the
+  same data could yield two different model names. `best_fit()` now uses the
+  app's AICc selection over the full portfolio. On a synthetic L-H curve the
+  package previously returned Zero-order (ΔAICc = 27.5); both now return L-H.
+  The linearised Lagergren fit remains available as a diagnostic but is no
+  longer a selection candidate, because its R² is on a different dependent
+  variable.
+- **Tab 2 no longer ranks models by linear R².** The linearisations use
+  different dependent variables (C, ln(C₀/C), 1/C), so their R² values are not
+  comparable. The table is now labelled a diagnostic. Its exclusion list
+  (Elovich, Double-Exponential) was also out of step with Tab 1, and an
+  unsourced claim that PSO and L-H are "more physically meaningful" was removed.
+- **Auto-saturation is no longer attributed to Simonin (2016).** The rule uses
+  the last observed removal as its own reference, so any setting below 1.0
+  drops exactly one point; Simonin's criterion needs an independently measured
+  equilibrium capacity. The slider, messages and README now say so.
+- Excluded time points are reported exactly (77.5 min was shown as 77).
+- `catlab.__version__` now matches the release (it said 1.1.0).
+- `_get_valid_models()` no longer raises `KeyError` on a partial results dict.
+- The release workflow now extracts this file's section for the release notes
+  (it produced an empty body).
+
+### Added
+- **Initial-rate TOF in Tab 4** (`TOF_0`, from the fitted r₀) alongside the
+  whole-run average, which depends on when the run was stopped. On synthetic
+  data with the same k, runs stopped at 50 % and 90 % conversion gave average
+  TOFs of 3.38 and 1.83 h⁻¹; the initial-rate TOF was 4.68 h⁻¹ for both.
+  Existing columns are renamed `TOF_avg` / `TOF_mass_avg`. Avrami and
+  Double-Exponential have no defined initial rate and report N/A.
+- `best_fit()` also returns `aicc`, `delta_aicc`, `weight`, `n_params` and
+  `selection_criterion`; `run_ods_analysis()` gains three summary columns.
+- README: Kostoglou & Karapantsios (2022) on linearised versus non-linear
+  fitting.
+- Tests: 83 → 104.
+
+### Note
+- No rate constant, R², AIC, AICc or Akaike weight changes for any model; what
+  changes is which model is named and how results are labelled.
+
 ## v3.5.5 (2026-08-16)
 
 ### Fixed

@@ -1,7 +1,7 @@
 # CatLab-Tools 🔬
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21965745.svg)](https://doi.org/10.5281/zenodo.21965745)
-![Version](https://img.shields.io/badge/version-v3.5.5-blue?style=flat-square)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753373.svg)](https://doi.org/10.5281/zenodo.20753373)
+![Version](https://img.shields.io/badge/version-v3.6.0-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
@@ -9,7 +9,7 @@
 ![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ods-kinetics.streamlit.app)
 
-**ODS Calculation Suite — v3.5.5**
+**ODS Calculation Suite — v3.6.0**
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
 ---
@@ -259,10 +259,10 @@ Download the advanced template from Tab 1 to get a pre-filled Excel file.
 
 ```
 CatLab-Tools/
-├── app_ods.py          # Main Streamlit app (v3.5.5)
+├── app_ods.py          # Main Streamlit app (v3.6.0)
 ├── requirements.txt    # numpy, pandas, matplotlib, scipy, openpyxl, streamlit
 ├── CHANGELOG.md        # Full version history
-├── CITATION.cff        # Citation metadata (DOI: 10.5281/zenodo.21965745)
+├── CITATION.cff        # Citation metadata (DOI: 10.5281/zenodo.20753373)
 ├── catlab/             # Core Python library modules
 ├── examples/           # Example datasets
 ├── tests/              # Unit tests
@@ -299,6 +299,9 @@ CatLab-Tools/
 
 | Version | Key Changes |
 |---------|-------------|
+| **v3.6.0** | One model-selection rule (AICc) across package API and app; initial-rate TOF in Tab 4; Tab 2 R² shown as a diagnostic, no ranking; exact reporting of fractional excluded times |
+| **v3.5.5** | AICc counts σ² as a parameter (K = p+1); Arrhenius CI uses the t-distribution; MIN_FIT_POINTS = 6; Akaike weights |
+| **v3.5.4** | Package kinetics fitting moved from linearised regression to the shared non-linear engine |
 | **v3.5.3** | Power-Law n>1 bug fix; Eley-Rideal excluded from auto-selection; Arrhenius composite-k warning; CSV auto-separator; Tab 4 Option B mass-normalized TOF for carbon catalysts |
 | **v3.5.2** | Auto-saturation detection (8%/15% thresholds); per-catalyst point exclusion in Tab 1; linearized plots based on best model |
 | **v3.5.1** | Power-Law numerical stability; Tab 8 savefig fix; model classification in assumptions |
@@ -316,8 +319,8 @@ CatLab-Tools/
 
 If you use CatLab-Tools in your research, please cite:
 
-> Jafari, H. (2026). *CatLab-Tools: ODS Calculation Suite* (v3.5.5). Zenodo.
-> DOI: [10.5281/zenodo.21965745](https://doi.org/10.5281/zenodo.21965745)
+> Jafari, H. (2026). *CatLab-Tools: ODS Calculation Suite* (v3.6.0). Zenodo.
+> DOI: [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373)
 
 ---
 
