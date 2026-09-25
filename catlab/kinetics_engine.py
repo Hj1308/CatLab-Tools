@@ -61,6 +61,16 @@ MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
 # penalizes its 3 params).
 BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
 
+# Gradient tolerance for every curve_fit call in _fit_nonlinear.
+# SciPy's default gtol = 1e-8 is an absolute-scale test on the gradient of the
+# cost.  ODS residuals are concentrations of order 1e-4 mol/L, so their squared
+# sum and its gradient are tiny in absolute terms, and the bounded trust-region
+# solver declares convergence before reaching the minimum.  On noisy synthetic
+# 7-point curves the default left L-H fits up to ~100x above the attainable SSE
+# and changed the selected model in 11 of 100 L-H datasets.  gtol = 1e-10 reaches
+# the same optimum as 1e-12 and 1e-14; ftol and xtol were not the cause.
+FIT_TOL = dict(gtol=1e-10)
+
 # TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
 # Its current formulation (dC/dt = -k_ER*K*C) is mathematically identical to
 # Pseudo-first-order with an extra unidentifiable parameter, so it provides no
@@ -324,7 +334,7 @@ def _fit_nonlinear(time, Ct, C0):
     # Zero-order
     try:
         p, pcov = curve_fit(lambda t_, k: _zero_order(t_, k, C0), t, Ct,
-                            p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000)
+                            p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k0 = p[0]
         pred = _zero_order(t, k0, C0)
@@ -346,7 +356,7 @@ def _fit_nonlinear(time, Ct, C0):
     # Pseudo-first-order
     try:
         p, pcov = curve_fit(lambda t_, k: _first_order(t_, k, C0), t, Ct,
-                            p0=[0.01], bounds=([0], [np.inf]), maxfev=5000)
+                            p0=[0.01], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         kapp = p[0]
         pred = _first_order(t, kapp, C0)
@@ -369,7 +379,7 @@ def _fit_nonlinear(time, Ct, C0):
     # Pseudo-second-order  (FIX T: concentration-based, k2 in L/mol/min)
     try:
         p, pcov = curve_fit(lambda t_, k: _second_order(t_, k, C0), t, Ct,
-                            p0=[1.0], bounds=([0], [np.inf]), maxfev=5000)
+                            p0=[1.0], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k2 = p[0]
         pred = _second_order(t, k2, C0)
@@ -392,7 +402,7 @@ def _fit_nonlinear(time, Ct, C0):
     # Elovich
     try:
         p, pcov = curve_fit(lambda t_, a, b: _elovich(t_, a, b, C0), t, Ct,
-                            p0=[1e-4, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
+                            p0=[1e-4, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         alpha = p[0]
         beta = p[1]
@@ -415,7 +425,7 @@ def _fit_nonlinear(time, Ct, C0):
     # Langmuir-Hinshelwood
     try:
         p, pcov = curve_fit(lambda t_, kLH, Kads: _lh_model(t_, kLH, Kads, C0), t, Ct,
-                            p0=[0.01, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000)
+                            p0=[0.01, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k_LH = p[0]
         K_ads = p[1]
@@ -444,7 +454,7 @@ def _fit_nonlinear(time, Ct, C0):
         p, pcov = curve_fit(
             lambda t_, k, n_: _power_law(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.5],
-            bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000)
+            bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k_pl, n_pl = p
         pred = _power_law(t, k_pl, n_pl, C0)
@@ -470,7 +480,7 @@ def _fit_nonlinear(time, Ct, C0):
         p, pcov = curve_fit(
             lambda t_, k, K: _eley_rideal(t_, k, K, C0),
             t, Ct, p0=[0.01, 10.0],
-            bounds=([0, 0], [np.inf, np.inf]), maxfev=8000)
+            bounds=([0, 0], [np.inf, np.inf]), maxfev=8000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k_er, K_er = p
         pred = _eley_rideal(t, k_er, K_er, C0)
@@ -496,7 +506,7 @@ def _fit_nonlinear(time, Ct, C0):
         p, pcov = curve_fit(
             lambda t_, k, n_: _avrami(t_, k, n_, C0),
             t, Ct, p0=[0.01, 1.0],
-            bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000)
+            bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k_av, n_av = p
         pred = _avrami(t, k_av, n_av, C0)
@@ -521,7 +531,7 @@ def _fit_nonlinear(time, Ct, C0):
         p, pcov = curve_fit(
             lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
             t, Ct, p0=[0.1, 0.01, 0.6],
-            bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000)
+            bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
         k1, k2 = p[0], p[1]
         A_frac = p[2]
