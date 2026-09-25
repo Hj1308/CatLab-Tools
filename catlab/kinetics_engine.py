@@ -71,6 +71,64 @@ BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
 # the same optimum as 1e-12 and 1e-14; ftol and xtol were not the cause.
 FIT_TOL = dict(gtol=1e-10)
 
+# Dimensionless shape parameters with finite curve_fit bounds:
+#   model -> [(index in popt, name, lower, upper)]
+# When a bound is binding, the covariance from curve_fit is not a valid
+# uncertainty.  Such fits get at_bound set and their SEs are reported as NaN.
+# They stay eligible for best-model selection: with the former Avrami bound
+# n <= 3, excluding them made sigmoidal (n = 3.6) data select Zero-order in
+# 100 of 100 synthetic runs, so the flag is a warning on the reported values,
+# not a veto on the model.
+# Avrami n is bounded at 4.0, the upper end of the JMAK range (3-D growth with
+# a constant nucleation rate); it was 3.0 up to v3.6.0.
+# Rate constants (lower bound 0, dimensional) are not checked: a closeness
+# window would depend on their units.
+BOUNDED_SHAPE_PARAMS = {
+    "Power-Law":          [(1, "n", 0.1, 5.0)],
+    "Avrami":             [(1, "n", 0.1, 4.0)],
+    "Double-Exponential": [(2, "A", 0.0, 1.0)],
+}
+BOUND_NEAR = 1e-3   # window: within 1e-3 * max(|bound|, 1) of the bound
+BOUND_STEP = 1e-6   # inward probe step, as a fraction of max(|bound|, 1)
+BOUND_RISE = 1e-8   # minimum relative SSE rise that counts as binding
+# Checked against refits with the bound relaxed, on 2400 noisy synthetic fits
+# (8 archetypes x 100 x 3 models): 442 of 454 binding bounds flagged, 11 false
+# flags (9 of them exactly on the bound).  11 of the 12 misses are
+# Double-Exponential fits with A ~ 0.001-0.007 whose relaxed optimum has A < 0.
+
+
+def _params_at_bound(f, t, Ct, popt, specs):
+    """Descriptions of shape parameters whose bound is binding.
+
+    A bound is binding when the parameter lies within BOUND_NEAR of it AND a
+    small step away from the bound, into the allowed range (BOUND_STEP), raises
+    the residual sum of squares by more than BOUND_RISE relative to the fitted
+    SSE.  That is the sign test of the KKT condition: the cost still falls
+    towards the bound, so the unconstrained optimum lies outside the allowed
+    range and the reported value is set by the bound, not the data.  At a
+    genuine interior optimum the change is second order and stays below
+    BOUND_RISE.  The step is taken inward because _power_law clips n to its
+    bounds internally, so a step past the bound would change nothing.
+    """
+    p = np.asarray(popt, dtype=float)
+    with np.errstate(all="ignore"):
+        sse0 = float(np.sum((Ct - f(t, *p)) ** 2))
+    if not np.isfinite(sse0) or sse0 <= 0.0:
+        return []
+    hits = []
+    for i, name, lo, hi in specs:
+        for b, side, sign in ((lo, "lower", -1.0), (hi, "upper", 1.0)):
+            scale = max(abs(b), 1.0)
+            if abs(p[i] - b) > BOUND_NEAR * scale:
+                continue
+            q = p.copy()
+            q[i] = p[i] - sign * BOUND_STEP * scale
+            with np.errstate(all="ignore"):
+                sse1 = float(np.sum((Ct - f(t, *q)) ** 2))
+            if np.isfinite(sse1) and (sse1 - sse0) / sse0 > BOUND_RISE:
+                hits.append(f"{name} at {side} bound {b:g}")
+    return hits
+
 # TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
 # Its current formulation (dC/dt = -k_ER*K*C) is mathematically identical to
 # Pseudo-first-order with an extra unidentifiable parameter, so it provides no
@@ -451,11 +509,15 @@ def _fit_nonlinear(time, Ct, C0):
 
     # Power-Law (General Reaction Order)
     try:
+        f_pl = lambda t_, k, n_: _power_law(t_, k, n_, C0)
         p, pcov = curve_fit(
-            lambda t_, k, n_: _power_law(t_, k, n_, C0),
+            f_pl,
             t, Ct, p0=[0.01, 1.5],
             bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
+        at_bound = _params_at_bound(f_pl, t, Ct, p, BOUNDED_SHAPE_PARAMS["Power-Law"])
+        if at_bound:
+            se = np.full_like(se, np.nan)
         k_pl, n_pl = p
         pred = _power_law(t, k_pl, n_pl, C0)
         r2v = _r2(Ct, pred)
@@ -469,6 +531,7 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": _power_law_t_half(C0, k_pl, n_pl),
             "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
             "col_k": "k_PL", "r0": r0, "r0_se": None,
+            "at_bound": at_bound,
         }
     except (RuntimeError, ValueError) as e:
         results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
@@ -503,11 +566,15 @@ def _fit_nonlinear(time, Ct, C0):
 
     # Avrami
     try:
+        f_av = lambda t_, k, n_: _avrami(t_, k, n_, C0)
         p, pcov = curve_fit(
-            lambda t_, k, n_: _avrami(t_, k, n_, C0),
+            f_av,
             t, Ct, p0=[0.01, 1.0],
-            bounds=([0, 0.1], [np.inf, 3.0]), maxfev=8000, **FIT_TOL)
+            bounds=([0, 0.1], [np.inf, 4.0]), maxfev=8000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
+        at_bound = _params_at_bound(f_av, t, Ct, p, BOUNDED_SHAPE_PARAMS["Avrami"])
+        if at_bound:
+            se = np.full_like(se, np.nan)
         k_av, n_av = p
         pred = _avrami(t, k_av, n_av, C0)
         r2v = _r2(Ct, pred)
@@ -520,6 +587,7 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": float("nan"),
             "k": k_av, "k_se": se[0],
             "col_k": "k_Avrami", "r0": None, "r0_se": None,
+            "at_bound": at_bound,
         }
     except (RuntimeError, ValueError) as e:
         results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
@@ -528,11 +596,15 @@ def _fit_nonlinear(time, Ct, C0):
 
     # Double Exponential
     try:
+        f_de = lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0)
         p, pcov = curve_fit(
-            lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0),
+            f_de,
             t, Ct, p0=[0.1, 0.01, 0.6],
             bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
+        at_bound = _params_at_bound(f_de, t, Ct, p, BOUNDED_SHAPE_PARAMS["Double-Exponential"])
+        if at_bound:
+            se = np.full_like(se, np.nan)
         k1, k2 = p[0], p[1]
         A_frac = p[2]
         pred = _double_exponential(t, k1, k2, A_frac, C0)
@@ -546,6 +618,7 @@ def _fit_nonlinear(time, Ct, C0):
             "t_half": float("nan"),
             "k": k1, "k_se": se[0],
             "col_k": "k1 (fast)", "r0": None, "r0_se": None,
+            "at_bound": at_bound,
         }
     except (RuntimeError, ValueError) as e:
         results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
@@ -565,6 +638,7 @@ def _best_model(res, model_names):
 
     Rules (in order):
     1. Exclude models in BEST_MODEL_EXCLUDE or with non-finite AICc.
+       (Fits with a binding parameter bound stay eligible; see at_bound.)
     2. Find model with lowest AICc (best_aicc).
     3. Parsimony window (DELTA=2.5): collect all models within 2.5 AICc units
        of best_aicc — these are statistically indistinguishable.

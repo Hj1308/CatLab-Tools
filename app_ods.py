@@ -847,10 +847,13 @@ def _tab_kinetics(cfg, uploaded):
             notes.append(f"excl: {', '.join(f'{x:g}' for x in sorted(excl))} min")
         if add_t0 and not has_t0:
             notes.append("t=0 added")
+        if br.get("at_bound"):
+            notes.append(f"⚠️ {'; '.join(br['at_bound'])} (SE not valid)")
         rows.append({
             "Catalyst":           cat_label,
             "Best Model":         best,
-            "k":                  _fmt_pm(br.get("k"), br.get("k_se")),
+            "k":                  (f"{_fmt_sci(br.get('k'))} (SE N/A)" if br.get("at_bound")
+                                   else _fmt_pm(br.get("k"), br.get("k_se"))),
             "R²":                 br.get("R2","N/A"),
             "Adj-R²":             br.get("adj_r2","N/A"),
             "AICc":               br.get("aicc","N/A"),
@@ -921,10 +924,15 @@ def _tab_kinetics(cfg, uploaded):
                             "Langmuir-Hinshelwood (general coverage) under "
                             "excess-oxidant conditions; never eligible for best-model "
                             "selection. k_ER and K are not individually identifiable.")
+                if mr.get("at_bound"):
+                    note = ("⚠️ " + "; ".join(mr["at_bound"]) + " — the bound, "
+                            "not the data, sets this value, so the SE is not a "
+                            "valid uncertainty.")
                 if mr.get("converged", True):
                     subrows.append({
                         "Model":    m,
-                        "k (±SE)":  _fmt_pm(mr.get("k"), mr.get("k_se")),
+                        "k (±SE)":  (f"{_fmt_sci(mr.get('k'))} (SE N/A)" if mr.get("at_bound")
+                                     else _fmt_pm(mr.get("k"), mr.get("k_se"))),
                         "R²":       mr.get("R2","N/A"),
                         "Adj-R²":   mr.get("adj_r2","N/A"),
                         "AICc":     mr.get("aicc","N/A"),
