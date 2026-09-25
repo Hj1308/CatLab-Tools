@@ -167,13 +167,32 @@ class KineticsAnalyser:
                 "R2": round(float(r.get("R2", 0.0)), 5)}
 
     def fit_pseudo_first_order(self) -> dict:
-        # Lagergren adsorption model — no engine equivalent, stays linearized
-        qe_est = self.c[0] - self.c[-1]
-        qt     = self.c[0] - self.c
-        y      = np.log(np.clip(qe_est - qt, 1e-12, None))
-        slope, intercept, r, *_ = linregress(self.t[:-1], y[:-1])
-        return {"model": "Pseudo-first-order", "k1 (h\u207b\u00b9)": round(-slope, 5),
-                "qe (mmol/g)": round(np.exp(intercept), 5), "R2": round(r**2, 5)}
+        """Lagergren pseudo-first-order, linearised: ln(qe - qt) = ln(qe) - k1*t.
+
+        Uptake per gram is q = (C0 - Ct) * V / m (mmol/g), and qe is taken as
+        the last observed q, so the last point is left out (qe - qt = 0).
+        An earlier point with qe - qt <= 0 (non-monotonic data) has no
+        logarithm; it is dropped and its time is listed in "dropped_t".  It
+        used to be clipped to 1e-12, which made it a ln = -27.6 outlier that
+        dominated the regression.  Fewer than 3 usable points returns NaN.
+
+        Diagnostic only: its dependent variable is ln(qe - qt), so its R2 is
+        not comparable with the non-linear fits and it is not an AICc
+        candidate (see best_fit).
+        """
+        m, V = self.info.catalyst_mass_g, self.info.solution_vol_L
+        per_g = V / m if m > 0 else float("nan")
+        q     = (self.c[0] - self.c) * per_g
+        gap   = q[-1] - q[:-1]
+        keep  = gap > 0
+        k1 = qe = r2 = float("nan")
+        if keep.sum() >= 3:
+            slope, intercept, r, *_ = linregress(self.t[:-1][keep], np.log(gap[keep]))
+            k1, qe, r2 = round(-slope, 5), round(np.exp(intercept), 5), round(r**2, 5)
+        return {"model": "Pseudo-first-order", "k1 (h\u207b\u00b9)": k1,
+                "qe (mmol/g)": qe, "R2": r2,
+                "n_points": int(keep.sum()),
+                "dropped_t": [float(x) for x in self.t[:-1][~keep]]}
 
     def best_fit(self) -> dict:
         """Select the best model by AICc over the full engine portfolio.

@@ -188,3 +188,50 @@ class TestUnifiedModelSelection:
         partial = {k: full[k] for k in ("Pseudo-first", "Zero-order")}
         assert _best_model(partial, MODEL_NAMES) in ("Pseudo-first", "Zero-order")
         assert akaike_weights(partial, model_names=MODEL_NAMES) != {}
+
+
+class TestLagergrenDiagnostic:
+    """fit_pseudo_first_order: per-gram uptake and non-monotonic points."""
+
+    T = np.array([0, 0.25, 0.5, 1, 1.5, 2, 3, 4.0])
+
+    @staticmethod
+    def _info(m_g, V_L):
+        return SampleInfo("Cat", "desulfurization", m_g, V_L, 500.0, "ppmS")
+
+    def _curve(self, info):
+        c0 = info.c0_mmol_L
+        return c0 - 0.91 * c0 * (1 - np.exp(-1.2 * self.T))
+
+    def test_qe_is_per_gram(self):
+        """Regression: qe was the concentration drop (mmol/L) labelled mmol/g.
+        With V/m = 2 L/g it must be twice the V/m = 1 value."""
+        a = self._info(0.05, 0.05)
+        b = self._info(0.05, 0.10)
+        c = self._curve(a)
+        qe_1 = KineticsAnalyser(self.T, c, a).fit_pseudo_first_order()["qe (mmol/g)"]
+        qe_2 = KineticsAnalyser(self.T, c, b).fit_pseudo_first_order()["qe (mmol/g)"]
+        assert qe_2 == pytest.approx(2.0 * qe_1, rel=1e-4)
+
+    def test_non_monotonic_point_is_dropped_not_clipped(self):
+        """Regression: a point below the final concentration was clipped to
+        1e-12, giving a ln = -27.6 outlier (R2 fell to ~0.2).  It must be
+        dropped and reported instead."""
+        info = self._info(0.05, 0.10)
+        c = self._curve(info)
+        clean = KineticsAnalyser(self.T, c, info).fit_pseudo_first_order()
+        c[5] = c[-1] - 0.05
+        r = KineticsAnalyser(self.T, c, info).fit_pseudo_first_order()
+        assert r["dropped_t"] == [2.0]
+        assert r["n_points"] == 6
+        assert r["R2"] > 0.99
+        assert r["qe (mmol/g)"] == pytest.approx(clean["qe (mmol/g)"], rel=0.01)
+
+    def test_too_few_usable_points_gives_nan(self):
+        info = self._info(0.05, 0.05)
+        t = np.array([0, 1, 2, 3.0])
+        c0 = info.c0_mmol_L
+        c = np.array([c0, 0.5 * c0, 0.2 * c0, 0.4 * c0])   # rises at the end
+        r = KineticsAnalyser(t, c, info).fit_pseudo_first_order()
+        assert r["n_points"] < 3
+        assert np.isnan(r["k1 (h⁻¹)"]) and np.isnan(r["qe (mmol/g)"])
