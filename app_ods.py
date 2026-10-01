@@ -86,26 +86,27 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
-from scipy.integrate import odeint   # FIX W: removed unused 'quad'
 from scipy import stats as scipy_stats
+from functools import partial
 import io
 import zipfile
 import warnings
 
 from catlab.kinetics_engine import (
-    MW_S, N_PARAMS, BEST_MODEL_EXCLUDE, MODEL_NAMES,
+    N_PARAMS, MODEL_NAMES,
     MIN_FIT_POINTS,
     COLORS, MARKERS,
-    _to_mol_L,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
-    _power_law, _power_law_t_half, _eley_rideal, _avrami, _double_exponential,
-    _r2, _adj_r2, _aic, _aicc,
-    _elovich_t_half, _lh_t_half,
+    _power_law, _eley_rideal, _avrami, _double_exponential,
+    _r2,
     _fmt_sci, _fmt_thalf, _fmt_pm,
-    _fit_nonlinear, _get_valid_models, _best_model, _auto_saturation_exclusions,
+    _fit_nonlinear, _best_model, _auto_saturation_exclusions,
     _anchor_mask,
 )
+from catlab.metrics import _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user
+
+# Re-exported for backward compatibility (tests/test_app_ods.py).
+from catlab.kinetics_engine import _get_valid_models  # noqa: F401
 
 # FIX E: scope warnings filter — don't suppress everything
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
@@ -176,39 +177,6 @@ SOLVENTS = {
 # ================================================================
 # SHARED HELPERS
 # ================================================================
-
-def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1, ppms_volumetric=True):
-    if c0_unit == "ppmS":
-        C0_S        = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL, ppms_volumetric)
-        C0_compound = C0_S / n_sulfur
-    else:
-        C0_compound = _to_mol_L(c0_val, c0_unit, mw_poll, rho_g_per_mL, ppms_volumetric)
-        C0_S        = C0_compound * n_sulfur
-    return C0_compound, C0_S
-
-
-def _initial_tof_site(r0, V_L, n_sites_mol):
-    """Initial-rate turnover frequency, min^-1.
-
-    TOF_0 = r0 * V / n_sites, with r0 in mol/L/min, V in L and n_sites in mol.
-    Returns nan when r0 is None (the selected model has no defined initial rate)
-    or when n_sites_mol is not strictly positive.
-    """
-    if r0 is None or n_sites_mol <= 0:
-        return float("nan")
-    return r0 * V_L / n_sites_mol
-
-
-def _initial_tof_mass(r0, V_L, m_g):
-    """Initial-rate mass-normalised activity, mmol/g/min.
-
-    TOF_mass,0 = r0 * V * 1000 / m, with r0 in mol/L/min, V in L and m in g.
-    Returns nan when r0 is None or when m_g is not strictly positive.
-    """
-    if r0 is None or m_g <= 0:
-        return float("nan")
-    return r0 * V_L * 1000.0 / m_g
-
 
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
@@ -696,19 +664,8 @@ def _tab_kinetics(cfg, uploaded):
         pass  # saturation detection is advisory only — never block main results
 
     # ── Helper: convert mol/L → user display unit ────────────────
-    def _C_to_user(Ct_mol):
-        if c0_unit == "ppmS":
-            return Ct_mol * 32.06 * 1000        # mol/L → mg(S)/L = ppmS volumetric
-        elif c0_unit in ("ppm", "mg/L"):
-            mw = cfg.get("mw_poll") or 184.26
-            return Ct_mol * mw * 1000
-        elif c0_unit == "mmol/L":
-            return Ct_mol * 1000
-        elif c0_unit == "g/L":
-            mw = cfg.get("mw_poll") or 184.26
-            return Ct_mol * mw
-        else:
-            return Ct_mol
+    mw_user = cfg.get("mw_poll") or 184.26
+    _C_to_user = partial(c_to_user, unit=c0_unit, mw=mw_user)
 
     u_label = c0_unit
     C0_user = _C_to_user(C0)
@@ -1626,24 +1583,6 @@ def _tab_comparison(cfg):
 # ================================================================
 # TAB 8 — Arrhenius Multi-Temperature Analysis
 # ================================================================
-def _arrhenius_ci(cov, n_T):
-    """95% confidence intervals for Eₐ and ln A from an Arrhenius fit.
-
-    Uses the t-distribution critical value t(0.975, n_T - 2) rather than the
-    normal-approximation z = 1.96, which understates the interval when only a
-    few temperature points are available. For n_T == 2 (df == 0) no valid CI
-    exists: both bounds are returned as NaN and df is returned as 0 so the
-    caller can surface a warning (point estimate of Eₐ only).
-    """
-    df = n_T - 2
-    if df < 1:
-        return np.nan, np.nan, df
-    t_crit = scipy_stats.t.ppf(0.975, df)
-    Ea_ci = np.sqrt(cov[0, 0]) * R_GAS / 1000.0 * t_crit
-    lnA_ci = np.sqrt(cov[1, 1]) * t_crit
-    return Ea_ci, lnA_ci, df
-
-
 def _tab_arrhenius(cfg):
     st.header("🌡️ Tab 8 — Arrhenius Analysis (Multi-Temperature)")
     st.markdown(r"""

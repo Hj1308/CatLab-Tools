@@ -4,7 +4,6 @@ import os, sys, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
-import pytest
 
 from catlab.kinetics_engine import (
     _fit_nonlinear, _first_order, _second_order, _lh_model,
