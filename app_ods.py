@@ -1,74 +1,11 @@
 """
 ODS Calculation Suite — Streamlit Web App
 ==========================================
-Extended build based on CatLab-Tools/app_ods.py (github.com/Hj1308/CatLab-Tools)
-Original author: Hoda Jafari
+Interactive oxidative-desulfurization (ODS) kinetics fitting and analysis.
 
-v3.5.0 — Release build (full scientific & code quality fixes)
--------------------------------------------------------------
-Earlier history (v3.1–v3.4.1):
-FIX 1 (v3.1): C0 is now locked (fixed) in curve_fit for all models.
-FIX 2 (v3.1): Second-order t1/2 corrected to 1/(k2*C0).
-FIX 3 (v3.1): Extrapolation warning added when t1/2 < first data point.
-FIX 4 (v3.1): Best-model selection moved away from raw R2.
-FIX 5 (v3.1): r0/m formula corrected — r0 * V_fuel / m_cat.
-NEW 7 (v3.2): Dual concentration display C0(compound) and C0(S).
-NEW 8 (v3.2): Solvent/fuel selector with preset densities.
-NEW 9 (v3.2): Oxidant efficiency tab warns when H2O2 not measured.
-NEW 10 (v3.2): Model assumptions documented in expandable section.
-FIX A (v3.3): _lh_t_half uses exact analytical solution from L-H ODE integration.
-FIX B (v3.3): SUBSTRATES dict includes n_sulfur field; _C0_both uses it correctly.
-FIX D (v3.3): Single file_uploader in session_state — upload once, use in all tabs.
-FIX E (v3.3): warnings.filterwarnings scoped to scipy/numpy RuntimeWarning only.
-FIX G (v3.3): Tab 1 best-model selection guarded against empty valid_models dict.
-FIX H (v3.3): Tab 2 polyfit wrapped in try/except with user-friendly error message.
-FIX I (v3.3): _load_kinetic_data helper centralises file reading and column detection.
-FIX J (v3.3): matplotlib.use("Agg") moved before all imports.
-FIX L (v3.3): Download zip in Tab 1 now includes fitted curves, not just raw data.
-NEW N (v3.4): Tab 8 — Arrhenius Multi-Temperature Analysis (extract Ea & A with 95% CI).
-NEW O (v3.4): Tab 9 — Residual Diagnostics (residuals, Q-Q, Shapiro-Wilk, runs test).
-NEW P (v3.4.1): create_advanced_template() — Excel template pre-filled with sidebar settings.
-v3.5.0 models: Power-Law, Eley-Rideal, Avrami, Double-Exponential added.
+Author: Hoda Jafari
 
-v3.5.2 — Tab 1 data preparation controls
-NEW AC: Auto-inject t=0 (Removal=0%, C=C₀) when missing from uploaded data.
-        Checkbox in Tab 1 — on by default when t=0 absent. Anchors nonlinear
-        fit at known initial condition; dramatically improves pseudo-second-order
-        and L-H detection vs pseudo-first-order.
-NEW AD: Manual point exclusion multiselect in Tab 1. Excluded points are shown
-        as open markers on the plot but removed from fitting. Column "Note" in
-        summary table records which points were excluded.
-NEW AE: Auto-warning when excluding the last time point changes the best model
-        (saturation detection heuristic).
-
-v3.5.1 — Patch release
-FIX X: _power_law now clips `inside` to 1e-12 *before* the fractional
-       exponent and wraps in np.abs — prevents NaN/complex when curve_fit
-       explores large-k or long-t regions where the argument goes negative.
-FIX Y: Tab 8 (Arrhenius) PNG saved before st.pyplot/plt.close so the figure
-       object is still alive when written to the ZIP archive.
-FIX Z: Arrhenius interpretation guide warns that k from L-H and Power-Law
-       is a composite parameter; Ea is apparent and not directly comparable
-       with pseudo-first-order Ea values from the literature.
-FIX AA: Model Assumptions sidebar now classifies all models as mechanistic /
-        simplified-mechanistic / phenomenological, with an explicit caution
-        for Avrami and Double-Exponential in ODS context.
-FIX AB: Advanced template catalyst_name field now shows "My-Catalyst"
-        placeholder instead of incorrectly using substrate_name.
-FIX R: ppmS conversion is now VOLUMETRIC by default (mg(S)/L, no density), matching
-       standard lab preparation. A sidebar toggle exposes the mass basis (mg/kg) for
-       users whose sulfur content is a true mass fraction (density then applied).
-FIX S: Best-model selection now uses AICc (small-sample corrected AIC) instead of AIC,
-       and excludes only models whose parameter count is too large for the data
-       (n - p - 1 <= 0). All kinetic models, including zero-order, compete fairly.
-FIX T: "Second-order" renamed to "Pseudo-second-order" to match thesis terminology
-       (concentration-based, k2 in L/mol/min — identical integrated rate law).
-FIX U: Residual diagnostics sigma now uses the number of FREE parameters (N_PARAMS),
-       not len(params) which wrongly counted the fixed C0.
-FIX V: Version string unified to v3.5.0 across docstring, page config and header.
-FIX W: Removed unused scipy.integrate.quad import.
-NOTE:  Tab 5 parameter sweep intentionally supports only the three closed-form models
-       (zero / pseudo-first / pseudo-second order); higher models remain fit-only.
+See CHANGELOG.md for history.
 
 Scientific references:
   - Barghi et al., ACS Omega 2025, 10, 15947. DOI: 10.1021/acsomega.4c06722
@@ -88,6 +25,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats as scipy_stats
 from functools import partial
+import re
 import io
 import zipfile
 import warnings
@@ -97,7 +35,7 @@ from catlab.kinetics_engine import (
     MIN_FIT_POINTS,
     COLORS, MARKERS,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
-    _power_law, _eley_rideal, _avrami, _double_exponential,
+    _power_law, _avrami, _double_exponential,
     _r2,
     _fmt_sci, _fmt_thalf, _fmt_pm,
     _fit_nonlinear, _best_model, _auto_saturation_exclusions,
@@ -178,6 +116,20 @@ SOLVENTS = {
 # SHARED HELPERS
 # ================================================================
 
+_NON_MINUTE_UNITS = {"h", "hr", "hrs", "hour", "hours",
+                     "s", "sec", "secs", "second", "seconds"}
+
+
+def _time_unit_suspicious(header):
+    """True when a time-column header looks like it is not in minutes.
+
+    The header is split into letter runs, so "Time (h)", "Time [hrs]", "t/h",
+    "Time, s" and "time_hours" are flagged while "Time (min)" and
+    "Time (minutes)" are not.
+    """
+    return any(w in _NON_MINUTE_UNITS for w in re.findall(r"[a-z]+", str(header).lower()))
+
+
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
     try:
@@ -206,6 +158,11 @@ def _load_kinetic_data(uploaded):
         st.error("No 'Time' column found.")
         return None, None, None
     time_col = time_col[0]
+    if _time_unit_suspicious(time_col):
+        st.warning(
+            f"⚠️ The time column '{time_col}' looks like it is not in minutes. "
+            "CatLab assumes minutes for all rate constants (k in min⁻¹ etc.). "
+            "Convert the column to minutes before uploading.")
     removal_cols = [c for c in df.columns if "removal" in str(c).lower()]
     if not removal_cols:
         removal_cols = [c for c in df.columns
@@ -293,7 +250,7 @@ models (too few points for their parameters) are excluded, but all kinetic
 models including zero-order compete on equal footing.
 
 **Model classes:**
-- *Mechanistic*: L-H, Eley-Rideal (surface-reaction based)
+- *Mechanistic*: L-H (surface-reaction based)
 - *Simplified mechanistic*: Zero-, Pseudo-first-, Pseudo-second-order, Power-Law
 - *Phenomenological / empirical*: Elovich (chemisorption heterogeneity),
   Avrami (nucleation/growth — uncommon in ODS; use with caution),
@@ -415,7 +372,6 @@ def _fit_curve(model, params, t_fine, C0):
     elif model == "Elovich":             return _elovich(t_fine, params[0], params[1], C0)
     elif model == "L-H":                 return _lh_model(t_fine, params[0], params[1], C0)
     elif model == "Power-Law":           return _power_law(t_fine, params[0], params[1], C0)
-    elif model == "Eley-Rideal":         return _eley_rideal(t_fine, params[0], params[1], C0)
     elif model == "Avrami":              return _avrami(t_fine, params[0], params[1], C0)
     elif model == "Double-Exponential":  return _double_exponential(t_fine, params[0], params[1], params[2], C0)
     return _lh_model(t_fine, params[0], params[1], C0)
@@ -749,7 +705,7 @@ def _tab_kinetics(cfg, uploaded):
             y_lbl     = f"1/C  ({u_label})⁻¹"
             title_lin = f"{cat_label} — Pseudo-second-order  |  1/C vs t"
         elif best in ("Pseudo-first", "Zero-order", "Power-Law",
-                      "Eley-Rideal", "Avrami", "L-H",
+                      "Avrami", "L-H",
                       "Elovich", "Double-Exponential"):
             # ln(C₀/C) vs t — valid for first-order regime; informative for others
             ratio  = np.maximum(C0_user / np.maximum(C_user, 1e-15), 1e-15)
@@ -874,12 +830,6 @@ def _tab_kinetics(cfg, uploaded):
             for m in model_names:
                 mr = res[m]
                 note = ""
-                if m == "Eley-Rideal":
-                    note = ("⚠️ Fit for completeness/comparison only — structurally "
-                            "redundant with Pseudo-first-order (low coverage) or "
-                            "Langmuir-Hinshelwood (general coverage) under "
-                            "excess-oxidant conditions; never eligible for best-model "
-                            "selection. k_ER and K are not individually identifiable.")
                 if mr.get("at_bound"):
                     note = ("⚠️ " + "; ".join(mr["at_bound"]) + " — the bound, "
                             "not the data, sets this value, so the SE is not a "

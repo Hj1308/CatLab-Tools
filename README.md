@@ -2,10 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753373.svg)](https://doi.org/10.5281/zenodo.20753373)
 ![Version](https://img.shields.io/badge/version-v3.6.0-blue?style=flat-square)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ods-kinetics.streamlit.app)
 
@@ -34,13 +33,22 @@ pip install -r requirements.txt
 streamlit run app_ods.py
 ```
 
+Alternatively, install the package with its app extras (or an exact reproduction
+via the lock file):
+
+```bash
+pip install -e .[app]
+# or, for an exact reproduction of the verified dependency set:
+pip install -r requirements-lock.txt
+```
+
 ---
 
 ## 📑 Modules (Tabs)
 
 | Tab | Module | Description |
 |-----|--------|-------------|
-| 1 | **Kinetic Fitting** | Fit 9 kinetic models, AICc model selection, k±SE, r₀, t½ |
+| 1 | **Kinetic Fitting** | Fit 8 kinetic models, AICc model selection, k±SE, r₀, t½ |
 | 2 | **Linearization** | Linear transforms (1/C vs t, ln(C₀/C) vs t) with best-model summary |
 | 3 | **Removal Efficiency** | Desulfurization efficiency (%) vs time + bar chart |
 | 4 | **TON / TOF** | Option A: site-based (metal catalysts) · Option B: mass-normalized (carbon-based) |
@@ -65,29 +73,11 @@ All models fitted by nonlinear least squares with C₀ locked.
 | Elovich | $C_t = C_0 - \frac{1}{\beta}\ln(1+\alpha\beta t)$ | $(e^{C_0\beta/2}-1)/(\alpha\beta)$ | Phenomenological |
 | Langmuir-Hinshelwood | $dC/dt = -k_{LH} K C / (1+KC)$ (ODE) | $\ln2/(k_{LH}K) + C_0/(2k_{LH})$ | Mechanistic |
 | Power-Law | $C_t = [C_0^{1-n} - k(1-n)t]^{1/(1-n)}$ | analytical | Empirical |
-| Eley-Rideal | $dC/dt = -k_{ER} K C$ (ODE, oxidant excess) | — | Semi-mechanistic |
 | Avrami | $C_t = C_0 \exp(-k t^n)$ | — | Phenomenological |
 | Double-Exponential | $C_t = C_0[A e^{-k_1 t} + (1-A)e^{-k_2 t}]$ | — | Phenomenological |
 
-> **Eley-Rideal is structurally redundant here.** This app measures only
-> single-species data (sulfur concentration vs time), and the surface-reaction
-> rate law is applied under **excess-oxidant** conditions (oxidant concentration
-> is constant and folded into the rate constant — the standard assumption for
-> liquid-phase ODS). Under that assumption the Eley-Rideal curve shape is
-> already spanned by two existing models:
->
-> - **Low surface coverage** — the adsorption isotherm is linear,
->   $\theta_A \approx K_A C_A$ (constant), giving $dC/dt = -k\,C$: mathematically
->   **identical to Pseudo-first-order**.
-> - **General coverage** — $\theta_A = K_A C_A/(1 + K_A C_A)$ (constant), and the
->   surface-reaction rate takes the rational form $C/(1+KC)$, i.e. exactly the
->   **Langmuir-Hinshelwood** functional form implemented in this app.
->
-> No distinguishing curve shape is therefore obtainable from $C(t)$ alone, and
-> the two fitted constants $k_{ER}$ and $K$ are only jointly identifiable (their
-> product equals the Pseudo-first-order rate constant). Eley-Rideal is **fit and
-> displayed for completeness/comparison only** (see the "All models" table) but is
-> **never eligible for automatic best-model selection** (`BEST_MODEL_EXCLUDE`).
+> Eley-Rideal was removed in v3.7.0: under excess oxidant its rate law is
+> Pseudo-first-order with an extra unidentifiable parameter.
 
 > **Auto-saturation detection:** Tab 1 offers a user-adjustable **fractional-uptake
 > cutoff** after Simonin (2016): any point whose removal exceeds a chosen fraction
@@ -246,6 +236,8 @@ C₀ [mol/L] = C [mg S/L] / (MW_S [g/mol] × 10³)
 **Required columns in `Raw_Data` sheet:**
 - `Time (min)` — reaction time
 - One or more catalyst columns: `CatName Removal (%)`
+
+Time must be in minutes.
 
 **Optional sheet — `Catalyst_Properties`** (for Tab 4 Option B):
 - `Catalyst` — must match catalyst column names

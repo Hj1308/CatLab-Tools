@@ -59,8 +59,8 @@
 #      both artefacts.  Ct[0] is reset to C0 after noising (C0 is locked in
 #      the fit).
 #
-#   3. Ground-truth generators exclude BEST_MODEL_EXCLUDE models
-#      (Eley-Rideal), whose recovery is 0 % by construction.
+#   3. Ground-truth generators exclude BEST_MODEL_EXCLUDE models, whose
+#      recovery is 0 % by construction (the set is empty as of v3.7.0).
 #
 #   4. Report per-archetype recovery AND the top-3 wrong selections for each.
 #      Define every aggregate: state bucket membership and whether the

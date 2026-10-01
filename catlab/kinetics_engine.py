@@ -35,33 +35,17 @@ N_PARAMS = {
     "Elovich":             2,
     "L-H":                 2,
     "Power-Law":           2,
-    "Eley-Rideal":         2,
     "Avrami":              2,
     "Double-Exponential":  3,   # k1, k2, A  (C0 is locked)
 }
 COLORS = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#17becf", "#bcbd22"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
 
-# Models excluded from automatic "best model" selection.
-# Eley-Rideal: structurally non-identifiable with this experiment type. Only
-# single-species data (sulfur concentration vs time) are available, and for the
-# surface-reaction rate law the oxidant is held in excess (constant concentration
-# folded into the rate constant), which is the standard assumption here. Under
-# excess oxidant the Eley-Rideal curve shape is spanned by existing models:
-#   - low surface coverage  : theta_A ~ K_A*C_A (const) -> dC/dt = -k*C  == Pseudo-first
-#   - general coverage      : theta_A ~ K_A*C_A/(1+K_A*C_A) (const) -> the rational
-#     C/(1+KC) term == the Langmuir-Hinshelwood functional form
-# So no distinguishing curve shape exists from C(t) alone; k_ER and K are only
-# jointly identifiable (the implemented dC/dt = -k_ER*K*C is literally
-# Pseudo-first-order with an extra unidentifiable parameter). Kept fitted for
-# completeness/comparison only — never eligible for best-model selection.
-# Double-Exponential (3 params) and Elovich were previously excluded too, but
-# synthetic validation (see README) showed this was not statistically justified:
-# with 11-point curves at +/-3% noise, Elovich is recoverable at 45% (vs 0% when
-# excluded) at the cost of only ~5% false PSO->Elovich wins on noise-level close
-# calls, and Double-Exponential rarely wins anyway (AICc parsimony already
-# penalizes its 3 params).
-BEST_MODEL_EXCLUDE = {"Eley-Rideal"}
+# Kept as an extension point: models in this set are fitted but never eligible
+# for automatic "best model" selection.  Eley-Rideal was removed in this
+# release (its rate law is Pseudo-first-order with an unidentifiable extra
+# parameter), so the set is currently empty.
+BEST_MODEL_EXCLUDE = set()
 
 # Gradient tolerance for every curve_fit call in _fit_nonlinear.
 # SciPy's default gtol = 1e-8 is an absolute-scale test on the gradient of the
@@ -131,14 +115,10 @@ def _params_at_bound(f, t, Ct, popt, specs):
                 hits.append(f"{name} at {side} bound {b:g}")
     return hits
 
-# TODO(decision): consider removing "Eley-Rideal" from MODEL_NAMES entirely.
-# Its current formulation (dC/dt = -k_ER*K*C) is mathematically identical to
-# Pseudo-first-order with an extra unidentifiable parameter, so it provides no
-# information beyond Pseudo-first-order. Larger decision — not implemented.
 MODEL_NAMES = [
     "Zero-order", "Pseudo-first", "Pseudo-second-order",
     "Elovich", "L-H",
-    "Power-Law", "Eley-Rideal", "Avrami", "Double-Exponential"
+    "Power-Law", "Avrami", "Double-Exponential"
 ]
 
 
@@ -283,11 +263,6 @@ def _power_law_t_half(C0, k, n):
         return float("nan")
     except Exception:
         return float("nan")
-
-def _eley_rideal(t, k_er, K, C0):
-    """Eley-Rideal: one species adsorbed, other reacts from bulk phase"""
-    t = np.asarray(t, dtype=float)
-    return np.maximum(C0 * np.exp(-k_er * K * t), 0.0)
 
 def _avrami(t, k_av, n_av, C0):
     """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
@@ -477,14 +452,6 @@ def _post_power_law(p, se, at_bound, C0):
             "col_k": "k_PL", "r0": r0, "r0_se": None,
             "at_bound": at_bound}
 
-def _post_eley(p, se, at_bound, C0):
-    k_er, K_er = p
-    r0 = k_er * K_er * C0
-    return {"label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
-            "t_half": float("nan"),
-            "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
-            "col_k": "k_ER", "r0": r0, "r0_se": None}
-
 def _post_avrami(p, se, at_bound, C0):
     k_av, n_av = p
     return {"label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
@@ -519,7 +486,6 @@ _MODEL_SPECS = [
     ("Elovich", _elovich, [1e-4, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_elovich),
     ("L-H", _lh_model, [0.01, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_lh),
     ("Power-Law", _power_law, [0.01, 1.5], ([0, 0.1], [np.inf, 5.0]), 10000, True, None, _post_power_law),
-    ("Eley-Rideal", _eley_rideal, [0.01, 10.0], ([0, 0], [np.inf, np.inf]), 8000, False, None, _post_eley),
     ("Avrami", _avrami, [0.01, 1.0], ([0, 0.1], [np.inf, 4.0]), 8000, True, None, _post_avrami),
     ("Double-Exponential", _double_exponential, [0.1, 0.01, 0.6], ([0, 0, 0], [np.inf, np.inf, 1.0]), 10000, True, _de_prepare, _post_double_exponential),
 ]

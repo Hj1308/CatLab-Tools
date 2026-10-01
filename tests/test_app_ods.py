@@ -15,6 +15,31 @@ import app_ods
 from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
 
 
+class TestTimeUnitSuspicious:
+    """The time-column header is checked for non-minute units, without ever
+    flagging "Time (min)" itself."""
+
+    @pytest.mark.parametrize("header,expected", [
+        ("Time (min)", False),
+        ("time", False),
+        ("Time (h)", True),
+        ("Time (hr)", True),
+        ("time_hours", True),
+        ("Time (s)", True),
+        ("Time (hrs)", True),
+        ("Time [h]", True),
+        ("t/h", True),
+        ("Time, h", True),
+        ("Time (sec)", True),
+        ("48h", True),
+        ("Time (minutes)", False),
+        ("Reaction time", False),
+        ("Times", False),
+    ])
+    def test_header_detection(self, header, expected):
+        assert app_ods._time_unit_suspicious(header) is expected
+
+
 class TestNonConvergedSentinelHandling:
     """Regression: failed fits carry converged=False (not R2=-999), and every
     consumer must skip them via the converged flag -- never via numeric R2
@@ -69,7 +94,7 @@ class TestAutoSaturationDetection:
     removal 91% → cutoff 77.35% at 0.85; every point above the cutoff is
     dropped, not just the last one (the old increment-based rule dropped only the
     final point here). The retained set is never allowed to fall below
-    MIN_FIT_POINTS, which keeps AICc finite for the whole 9-model portfolio; a
+    MIN_FIT_POINTS, which keeps AICc finite for the whole 8-model portfolio; a
     cutoff that would strip below the floor reports `clamped=True` instead.
     A (t=0, 0 %) point is an anchor, never fitted, so it does not count
     towards that floor: the 7-point T below has 6 informative points.

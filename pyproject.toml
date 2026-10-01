@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "catlab-tools"
+dynamic = ["version"]
+description = "ODS kinetics fitting and catalyst analysis suite"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Hoda Jafari" },
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+app = [
+    "streamlit>=1.30",
+    "openpyxl>=3.1",
+]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "flake8",
+]
+
+[tool.setuptools]
+packages = ["catlab"]
+
+[tool.setuptools.dynamic]
+version = { attr = "catlab.__version__" }
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: long-running tests (validation harness determinism), run with `-m slow`",
+]
+addopts = "-m \"not slow\""

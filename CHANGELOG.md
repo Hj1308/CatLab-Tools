@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- **The app warns when the time column is not in minutes.** A header that
+  looks like hours or seconds ("(h)", "hr", "hour", "(s)", "sec") triggers a
+  warning reminding the user that all rate constants assume minutes.
+
 ### Fixed
 - **The t=0 point no longer inflates the statistics.** C₀ is locked in every
   model, so a (t=0, C₀) point is fitted exactly by construction. It used to
@@ -32,6 +37,12 @@
 - **Scientific helpers moved out of the UI.** `_C0_both`, `_initial_tof_site`,
   `_initial_tof_mass`, `_arrhenius_ci` and `c_to_user` now live in
   `catlab/metrics.py` (no Streamlit import) with their own tests.
+
+### Removed
+- **Eley-Rideal model removed.** Under excess oxidant its rate law
+  `dC/dt = -k_ER·K·C` is Pseudo-first-order with an extra unidentifiable
+  parameter, so it only confused the results table. `BEST_MODEL_EXCLUDE` is
+  kept as an empty extension point.
 
 ## v3.6.0 (2026-09-25)
 

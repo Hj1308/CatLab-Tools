@@ -149,10 +149,10 @@ class TestAkaikeWeights:
         assert "B" in w
 
     def test_exclude_honoured(self):
-        res = {"A": {"aicc": 1.0}, "Eley-Rideal": {"aicc": 2.0}}
-        w = akaike_weights(res, model_names=["A", "Eley-Rideal"],
-                           exclude={"Eley-Rideal"})
-        assert "Eley-Rideal" not in w
+        res = {"A": {"aicc": 1.0}, "Excluded-Model": {"aicc": 2.0}}
+        w = akaike_weights(res, model_names=["A", "Excluded-Model"],
+                           exclude={"Excluded-Model"})
+        assert "Excluded-Model" not in w
         assert "A" in w
 
     def test_empty_when_no_finite(self):

@@ -1,5 +1,7 @@
 # Audit Report — `upgrade/audit-and-fixes`
 
+> Historical document (pre-v3.5). Most findings are fixed; see CHANGELOG.md. Kept for the record.
+
 Read-only review of `app_ods.py`, `catlab/catalyst_analytics.py`, `catlab/ods_kinetics.py`,
 `tests/test_catlab.py`, and `.github/workflows/ci.yml`. No code was modified.
 
