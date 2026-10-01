@@ -90,3 +90,14 @@ def test_double_exponential_k1_always_fast():
     assert r["k"] > r["k2"]
     assert abs(r["params"][2] - (1 - A)) < 0.05
     assert "k2" in r and "k2_se" in r
+
+
+def test_de_prepare_swaps_slow_first_pair():
+    """The fit above converges with k1 > k2 already, so it never reaches the
+    swap; exercise _de_prepare directly."""
+    from catlab.kinetics_engine import _de_prepare
+    p, se = _de_prepare(np.array([0.005, 0.08, 0.3]), np.array([1.0, 2.0, 3.0]))
+    np.testing.assert_allclose(p, [0.08, 0.005, 0.7])
+    np.testing.assert_allclose(se, [2.0, 1.0, 3.0])
+    p, se = _de_prepare(np.array([0.08, 0.005, 0.7]), np.array([2.0, 1.0, 3.0]))
+    np.testing.assert_allclose(p, [0.08, 0.005, 0.7])   # already ordered: unchanged

@@ -26,6 +26,12 @@
 - **Double-Exponential: k1 is always the fast rate.** The fit could return
   k1 < k2 while the column said "k1 (fast)"; the pair is now swapped with
   A → 1−A. `k2` and `k2_se` are reported too.
+- **`_fit_nonlinear` is table-driven.** Nine copied try/except blocks are now
+  one model-spec table and one loop; output is bit-for-bit identical
+  (golden-master test, `tests/test_golden_master.py`).
+- **Scientific helpers moved out of the UI.** `_C0_both`, `_initial_tof_site`,
+  `_initial_tof_mass`, `_arrhenius_ci` and `c_to_user` now live in
+  `catlab/metrics.py` (no Streamlit import) with their own tests.
 
 ## v3.6.0 (2026-09-25)
 

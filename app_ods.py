@@ -150,7 +150,7 @@ plt.rcParams.update({
 })
 
 # -- Constants ----------------------------------------------------
-R_GAS  = 8.314   # J/(mol·K)
+from catlab.metrics import R_GAS  # noqa: E402  J/(mol·K)
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {

@@ -10,6 +10,10 @@
 # then calling that module's _fit_nonlinear.  Re-running this script against the
 # *refactored* engine is still bit-for-bit identical (the refactor preserves
 # every float), so the committed JSON is authoritative either way.
+#
+# The default test tolerates numpy/scipy/BLAS differences between machines;
+# GOLDEN_STRICT=1 compares every float at rtol=1e-12 and only holds on the
+# machine that produced the JSON (see tests/test_golden_master.py).
 import os, sys, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
