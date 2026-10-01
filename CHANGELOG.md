@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## v3.7.0 (2026-10-01)
 
 ### Added
 - **The app warns when the time column is not in minutes.** A header that
-  looks like hours or seconds ("(h)", "hr", "hour", "(s)", "sec") triggers a
+  looks like hours or seconds ("(h)", "[hrs]", "t/h", "48h", "(s)", "sec") triggers a
   warning reminding the user that all rate constants assume minutes.
 
 ### Fixed
