@@ -15,6 +15,22 @@ import app_ods
 from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
 
 
+class TestTimeUnitSuspicious:
+    """The time-column header is checked for non-minute units, without ever
+    flagging "Time (min)" itself."""
+
+    @pytest.mark.parametrize("header,expected", [
+        ("Time (min)", False),
+        ("time", False),
+        ("Time (h)", True),
+        ("Time (hr)", True),
+        ("time_hours", True),
+        ("Time (s)", True),
+    ])
+    def test_header_detection(self, header, expected):
+        assert app_ods._time_unit_suspicious(header) is expected
+
+
 class TestNonConvergedSentinelHandling:
     """Regression: failed fits carry converged=False (not R2=-999), and every
     consumer must skip them via the converged flag -- never via numeric R2

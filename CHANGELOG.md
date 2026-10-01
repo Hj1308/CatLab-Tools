@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- **The app warns when the time column is not in minutes.** A header that
+  looks like hours or seconds ("(h)", "hr", "hour", "(s)", "sec") triggers a
+  warning reminding the user that all rate constants assume minutes.
+
 ### Fixed
 - **The t=0 point no longer inflates the statistics.** C₀ is locked in every
   model, so a (t=0, C₀) point is fitted exactly by construction. It used to

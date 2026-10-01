@@ -229,6 +229,8 @@ C₀ [mol/L] = C [mg S/L] / (MW_S [g/mol] × 10³)
 - `Time (min)` — reaction time
 - One or more catalyst columns: `CatName Removal (%)`
 
+Time must be in minutes.
+
 **Optional sheet — `Catalyst_Properties`** (for Tab 4 Option B):
 - `Catalyst` — must match catalyst column names
 - `BET (m²/g)` — BET surface area

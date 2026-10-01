@@ -88,6 +88,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats as scipy_stats
 from functools import partial
+import re
 import io
 import zipfile
 import warnings
@@ -178,6 +179,18 @@ SOLVENTS = {
 # SHARED HELPERS
 # ================================================================
 
+def _time_unit_suspicious(header):
+    """True when a time-column header looks like it is not in minutes.
+
+    Matches "(h)", "hour", "(s)", "sec" and the whole word "hr" so that
+    "Time (min)" never triggers a warning.
+    """
+    h = str(header).lower()
+    if "(h)" in h or "hour" in h or "(s)" in h or "sec" in h:
+        return True
+    return re.search(r"\bhr\b", h) is not None
+
+
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
     try:
@@ -206,6 +219,11 @@ def _load_kinetic_data(uploaded):
         st.error("No 'Time' column found.")
         return None, None, None
     time_col = time_col[0]
+    if _time_unit_suspicious(time_col):
+        st.warning(
+            f"⚠️ The time column '{time_col}' looks like it is not in minutes. "
+            "CatLab assumes minutes for all rate constants (k in min⁻¹ etc.). "
+            "Convert the column to minutes before uploading.")
     removal_cols = [c for c in df.columns if "removal" in str(c).lower()]
     if not removal_cols:
         removal_cols = [c for c in df.columns
