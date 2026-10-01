@@ -71,6 +71,8 @@ class TestAutoSaturationDetection:
     final point here). The retained set is never allowed to fall below
     MIN_FIT_POINTS, which keeps AICc finite for the whole 9-model portfolio; a
     cutoff that would strip below the floor reports `clamped=True` instead.
+    A (t=0, 0 %) point is an anchor, never fitted, so it does not count
+    towards that floor: the 7-point T below has 6 informative points.
     Default max_fractional_uptake is 1.0 (disabled); tests pass lower values
     explicitly to exercise the cutoff."""
 
@@ -97,24 +99,25 @@ class TestAutoSaturationDetection:
 
     def test_cutoff_scales_with_final_removal(self):
         # final = 80 → cutoff 68.0 at 0.85; only the point above it (80) drops.
-        rem2 = np.array([0.0, 12.0, 25.0, 40.0, 55.0, 68.0, 80.0])
+        T8   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        rem2 = np.array([0.0, 6.0, 12.0, 25.0, 40.0, 55.0, 68.0, 80.0])
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            self.T, rem2, max_fractional_uptake=0.85)
+            T8, rem2, max_fractional_uptake=0.85)
         assert excl == [6]
-        assert rem_keep.tolist() == [0.0, 12.0, 25.0, 40.0, 55.0, 68.0]
+        assert rem_keep.tolist() == [0.0, 6.0, 12.0, 25.0, 40.0, 55.0, 68.0]
         assert not clamped
 
     def test_lower_cutoff_drops_more_points(self):
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             self.T, self.REM, max_fractional_uptake=0.5)
-        # cutoff = 45.5 → 50, 68, 80, 91 are all ABOVE it.  MIN_FIT_POINTS stops
-        # stripping at 6 points, so only the tail point (91) is dropped; 50, 68
-        # and 80 are retained only because of the length floor, which is exactly
-        # why clamped is True.
-        assert excl == [6]
+        # cutoff = 45.5 → 50, 68, 80, 91 are all ABOVE it.  The 6 informative
+        # points (t=0 is an anchor) already sit at MIN_FIT_POINTS, so nothing
+        # can be dropped; the points above the cutoff are retained only because
+        # of the length floor, which is exactly why clamped is True.
+        assert excl == []
         assert clamped
-        assert len(rem_keep) == MIN_FIT_POINTS
-        assert rem_keep.tolist() == [0.0, 16.0, 30.0, 50.0, 68.0, 80.0]
+        assert len(rem_keep) - 1 == MIN_FIT_POINTS
+        assert rem_keep.tolist() == self.REM.tolist()
 
     def test_max_frac_1_0_disables(self):
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
@@ -131,9 +134,11 @@ class TestAutoSaturationDetection:
 
     def test_best_model_flips_without_vs_with_exclusion(self):
         c0 = 500.0 / 32.06 / 1000.0
-        best_before, _ = self._best(self.T, self.REM, c0)
+        T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 86.0, 91.0])
+        best_before, _ = self._best(T, REM, c0)
         excl, t_keep, rem_keep, _ = app_ods._auto_saturation_exclusions(
-            self.T, self.REM, max_fractional_uptake=0.85)
+            T, REM, max_fractional_uptake=0.85)
         assert excl == [6]
         best_after, _ = self._best(t_keep, rem_keep, c0)
 
@@ -164,7 +169,7 @@ class TestAutoSaturationDetection:
         """
         n = MIN_FIT_POINTS
         rem = 20.0 * np.arange(n, dtype=float)  # [0, 20, ..., 20*(n-1)]
-        T = np.arange(n, dtype=float)
+        T = np.arange(1, n + 1, dtype=float)    # no t=0 anchor: all n informative
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             T, rem, max_fractional_uptake=0.5)
         assert excl == []
@@ -175,12 +180,12 @@ class TestAutoSaturationDetection:
     def test_fractional_time_is_reported_exactly(self):
         """Regression: excluded times were cast with int(), so 77.5 min was
         reported as 77.  The excluded value must equal the dropped time."""
-        T   = np.array([0.0, 10.0, 20.0, 30.0, 45.0, 60.0, 77.5])
-        REM = np.array([0.0, 20.0, 38.0, 52.0, 66.0, 76.0, 90.0])
+        T   = np.array([0.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 77.5])
+        REM = np.array([0.0, 10.0, 20.0, 38.0, 52.0, 66.0, 76.0, 90.0])
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
             T, REM, max_fractional_uptake=0.85)
         assert excl == [77.5]
-        assert t_keep.tolist() == [0.0, 10.0, 20.0, 30.0, 45.0, 60.0]
+        assert t_keep.tolist() == [0.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0]
 
 
 class TestEdgeCaseModels:

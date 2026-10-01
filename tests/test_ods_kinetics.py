@@ -74,10 +74,11 @@ class TestFitKinetics:
     # ---- edge cases ---------------------------------------------------
 
     def test_single_point_runs_without_crash(self):
-        """One data point: engine returns p0, R2=0.  Covariance warning
-        is expected (curve_fit cannot estimate covariance from 1 point)."""
+        """One informative data point: engine returns p0, R2=0.  Covariance
+        warning is expected (curve_fit cannot estimate covariance from 1 point).
+        A (t=0, C0) point would not do: it is an anchor and is never fitted."""
         with pytest.warns(OptimizeWarning, match="Covariance"):
-            result = _fit_kinetics(np.array([0.0]), np.array([C0]), C0)
+            result = _fit_kinetics(np.array([30.0]), np.array([0.5 * C0]), C0)
         # Degenerate fit — k may be p0 or 0, but R2 should be 0
         assert result["R2_first"] == pytest.approx(0.0, abs=1e-12)
         assert result["R2_second"] == pytest.approx(0.0, abs=1e-12)
@@ -86,7 +87,7 @@ class TestFitKinetics:
         """Two points: minimal valid fit recovers k.  Multi-param models
         (Elovich, L-H, etc.) cannot estimate covariance from 2 points and
         raise OptimizeWarning — expected and harmless."""
-        t = np.array([0.0, 60.0])
+        t = np.array([30.0, 60.0])  # (0, C0) would be an anchor, not data
         k_true = 0.02
         Ct = _first_order(t, k_true, C0)
         with pytest.warns(OptimizeWarning, match="Covariance"):

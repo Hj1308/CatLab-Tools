@@ -86,25 +86,27 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
-from scipy.integrate import odeint   # FIX W: removed unused 'quad'
 from scipy import stats as scipy_stats
+from functools import partial
 import io
 import zipfile
 import warnings
 
 from catlab.kinetics_engine import (
-    MW_S, N_PARAMS, BEST_MODEL_EXCLUDE, MODEL_NAMES,
+    N_PARAMS, MODEL_NAMES,
     MIN_FIT_POINTS,
     COLORS, MARKERS,
-    _to_mol_L,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
-    _power_law, _power_law_t_half, _eley_rideal, _avrami, _double_exponential,
-    _r2, _adj_r2, _aic, _aicc,
-    _elovich_t_half, _lh_t_half,
+    _power_law, _eley_rideal, _avrami, _double_exponential,
+    _r2,
     _fmt_sci, _fmt_thalf, _fmt_pm,
-    _fit_nonlinear, _get_valid_models, _best_model, _auto_saturation_exclusions,
+    _fit_nonlinear, _best_model, _auto_saturation_exclusions,
+    _anchor_mask,
 )
+from catlab.metrics import _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user
+
+# Re-exported for backward compatibility (tests/test_app_ods.py).
+from catlab.kinetics_engine import _get_valid_models  # noqa: F401
 
 # FIX E: scope warnings filter — don't suppress everything
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
@@ -148,7 +150,7 @@ plt.rcParams.update({
 })
 
 # -- Constants ----------------------------------------------------
-R_GAS  = 8.314   # J/(mol·K)
+from catlab.metrics import R_GAS  # noqa: E402  J/(mol·K)
 
 # FIX B: added n_sulfur field
 SUBSTRATES = {
@@ -175,39 +177,6 @@ SOLVENTS = {
 # ================================================================
 # SHARED HELPERS
 # ================================================================
-
-def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1, ppms_volumetric=True):
-    if c0_unit == "ppmS":
-        C0_S        = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL, ppms_volumetric)
-        C0_compound = C0_S / n_sulfur
-    else:
-        C0_compound = _to_mol_L(c0_val, c0_unit, mw_poll, rho_g_per_mL, ppms_volumetric)
-        C0_S        = C0_compound * n_sulfur
-    return C0_compound, C0_S
-
-
-def _initial_tof_site(r0, V_L, n_sites_mol):
-    """Initial-rate turnover frequency, min^-1.
-
-    TOF_0 = r0 * V / n_sites, with r0 in mol/L/min, V in L and n_sites in mol.
-    Returns nan when r0 is None (the selected model has no defined initial rate)
-    or when n_sites_mol is not strictly positive.
-    """
-    if r0 is None or n_sites_mol <= 0:
-        return float("nan")
-    return r0 * V_L / n_sites_mol
-
-
-def _initial_tof_mass(r0, V_L, m_g):
-    """Initial-rate mass-normalised activity, mmol/g/min.
-
-    TOF_mass,0 = r0 * V * 1000 / m, with r0 in mol/L/min, V in L and m in g.
-    Returns nan when r0 is None or when m_g is not strictly positive.
-    """
-    if r0 is None or m_g <= 0:
-        return float("nan")
-    return r0 * V_L * 1000.0 / m_g
-
 
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
@@ -511,10 +480,12 @@ def _tab_kinetics(cfg, uploaded):
     add_t0 = st.checkbox(
         "Auto-add t=0 point (Removal=0%, C=C₀)",
         value=(not has_t0),
-        help="Recommended when t=0 is missing. Anchors the fit at C₀ — "
-             "improves pseudo-second-order and L-H detection.")
+        help="Adds the (t=0, C₀) point to plots and tables. C₀ is already locked "
+             "in every model, so this point is fitted exactly by construction and "
+             "is NOT counted in n, R², AICc or the residual statistics.")
     if add_t0 and not has_t0:
-        st.info("✅ t=0 will be added automatically to all catalysts before fitting.")
+        st.info("✅ t=0 will be shown for all catalysts (display only — C₀ is locked, "
+                "so it does not change the fit or its statistics).")
     elif add_t0 and has_t0:
         st.info("ℹ️ t=0 already present — no duplication.")
 
@@ -526,7 +497,9 @@ def _tab_kinetics(cfg, uploaded):
             st.session_state[f"excl_{col}"] = []
 
     st.markdown("**Point exclusion per catalyst** — select outlier / saturation points:")
-    t_labels  = [f"t = {int(ti)} min" for ti in t_raw]
+    # Labels map back to the exact time value; int() would merge 7.5 into 7.
+    t_label_map = {f"t = {ti:g} min": float(ti) for ti in t_raw}
+    t_labels    = list(t_label_map)
     n_cols_ui = min(len(removal_cols), 3)
     cols_ui   = st.columns(n_cols_ui)
     excl_per_cat = {}
@@ -538,13 +511,7 @@ def _tab_kinetics(cfg, uploaded):
                 options=t_labels, default=[],
                 key=f"excl_{col}",
                 help=f"Excluded points shown as open markers on the plot.")
-            excl_times = set()
-            for lbl in excl:
-                try:
-                    excl_times.add(float(lbl.replace("t = ","").replace(" min","")))
-                except Exception:
-                    pass
-            excl_per_cat[col] = excl_times
+            excl_per_cat[col] = {t_label_map[lbl] for lbl in excl if lbl in t_label_map}
 
     st.markdown("---")
 
@@ -653,7 +620,7 @@ def _tab_kinetics(cfg, uploaded):
         Ct_fit_per_cat[col] = Ct_fit
         # Show diagnostic before fitting
         n_excl = len(excl_times)
-        n_pts  = len(t_fit)
+        n_pts  = int(np.sum(~_anchor_mask(t_fit, Ct_fit, C0)))  # t=0 anchor not counted
         if n_excl > 0:
             st.caption(f"  {col.replace(' Removal (%)','').strip()}: "
                        f"{n_pts} points used ({n_excl} excluded)")
@@ -691,25 +658,14 @@ def _tab_kinetics(cfg, uploaded):
                     st.info(
                         f"ℹ️ **{cat_label}**: best model changes "
                         f"**{best_all} → {best_nl}** when "
-                        f"t = {int(t_fit_s[-1])} min is excluded. "
+                        f"t = {t_fit_s[-1]:g} min is excluded. "
                         f"Possible saturation — consider excluding it above.")
     except Exception:
         pass  # saturation detection is advisory only — never block main results
 
     # ── Helper: convert mol/L → user display unit ────────────────
-    def _C_to_user(Ct_mol):
-        if c0_unit == "ppmS":
-            return Ct_mol * 32.06 * 1000        # mol/L → mg(S)/L = ppmS volumetric
-        elif c0_unit in ("ppm", "mg/L"):
-            mw = cfg.get("mw_poll") or 184.26
-            return Ct_mol * mw * 1000
-        elif c0_unit == "mmol/L":
-            return Ct_mol * 1000
-        elif c0_unit == "g/L":
-            mw = cfg.get("mw_poll") or 184.26
-            return Ct_mol * mw
-        else:
-            return Ct_mol
+    mw_user = cfg.get("mw_poll") or 184.26
+    _C_to_user = partial(c_to_user, unit=c0_unit, mw=mw_user)
 
     u_label = c0_unit
     C0_user = _C_to_user(C0)
@@ -724,7 +680,7 @@ def _tab_kinetics(cfg, uploaded):
                 C_t = C0 * (1 - rem / 100.0)
                 row = {
                     "Catalyst":    cat_label2,
-                    "Time (min)":  int(ti),
+                    "Time (min)":  float(ti),
                     "Removal (%)": round(rem, 2),
                     "C (mmol/L)":  round(C_t * 1000, 4),
                 }
@@ -902,7 +858,7 @@ def _tab_kinetics(cfg, uploaded):
                     r2_without   = r2_with
                 det_rows.append({
                     "Catalyst":                 cat_label,
-                    "Auto-excluded t (min)":    ", ".join(str(int(x)) for x in sorted(excl_pts)) if excl_pts else "—",
+                    "Auto-excluded t (min)":    ", ".join(f"{x:g}" for x in sorted(excl_pts)) if excl_pts else "—",
                     "Best model WITHOUT excl.": best_without or "—",
                     "R² (without)":             f"{r2_without:.4f}" if not np.isnan(r2_without) else "—",
                     "Best model WITH excl.":    best_with or "—",
@@ -1627,24 +1583,6 @@ def _tab_comparison(cfg):
 # ================================================================
 # TAB 8 — Arrhenius Multi-Temperature Analysis
 # ================================================================
-def _arrhenius_ci(cov, n_T):
-    """95% confidence intervals for Eₐ and ln A from an Arrhenius fit.
-
-    Uses the t-distribution critical value t(0.975, n_T - 2) rather than the
-    normal-approximation z = 1.96, which understates the interval when only a
-    few temperature points are available. For n_T == 2 (df == 0) no valid CI
-    exists: both bounds are returned as NaN and df is returned as 0 so the
-    caller can surface a warning (point estimate of Eₐ only).
-    """
-    df = n_T - 2
-    if df < 1:
-        return np.nan, np.nan, df
-    t_crit = scipy_stats.t.ppf(0.975, df)
-    Ea_ci = np.sqrt(cov[0, 0]) * R_GAS / 1000.0 * t_crit
-    lnA_ci = np.sqrt(cov[1, 1]) * t_crit
-    return Ea_ci, lnA_ci, df
-
-
 def _tab_arrhenius(cfg):
     st.header("🌡️ Tab 8 — Arrhenius Analysis (Multi-Temperature)")
     st.markdown(r"""
@@ -1829,6 +1767,14 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     with col2: model_choice = st.selectbox("Select model",    model_names,  key="resid_model")
     removal = df[cat_choice].dropna().values[:len(t)].astype(float)
     Ct_obs  = C0 * (1 - removal / 100.0)
+    # The (t=0, C0) anchor has zero residual by construction (C0 is locked);
+    # keeping it would bias sigma, Shapiro-Wilk and the runs test.
+    informative = ~_anchor_mask(t[:len(Ct_obs)], Ct_obs, C0)
+    if not informative.all():
+        st.caption("t = 0 (C = C₀) is excluded from the residual statistics: "
+                   "C₀ is locked, so every model fits it exactly.")
+    t      = t[:len(Ct_obs)][informative]
+    Ct_obs = Ct_obs[informative]
     all_res = _fit_nonlinear(t, Ct_obs, C0)
     res = all_res[model_choice]
     if not res.get("converged", True):

@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The t=0 point no longer inflates the statistics.** C₀ is locked in every
+  model, so a (t=0, C₀) point is fitted exactly by construction. It used to
+  count as data: n rose by one, R² rose, and AICc gaps between models shrank
+  (on a noisy PFO curve the L-H gap fell from 6.0 to 4.4, inside reach of the
+  2.5 parsimony window). Such points are now left out of fitting, R², AICc,
+  the auto-saturation floor and the Tab 9 residual statistics. "Auto-add t=0"
+  is now display-only. A t=0 point below C₀ (e.g. after dark adsorption) is
+  still fitted.
+- **Manual exclusion works for fractional times.** Tab 1 built the exclusion
+  labels with `int()`, so excluding 7.5 min matched nothing (or removed a
+  7 min point instead). Times are now shown and matched exactly, here and in
+  the raw-data table and saturation messages.
+- Removed the unused `openai` dependency from `requirements.txt`.
+
+### Changed
+- **Langmuir-Hinshelwood uses its exact closed form.** C(t) = W(K·C₀·e^(K·C₀−k·K·t))/K
+  (Lambert W) replaces `odeint` (rtol 1e-6), whose error was far above the fit
+  tolerance (gtol 1e-10) and made the finite-difference Jacobian noisy.
+  Agrees with a 50-digit mpmath reference to ~1e-15 relative. Eley-Rideal
+  uses its closed form C₀·e^(−k·K·t); `odeint` is no longer imported.
+- **Double-Exponential: k1 is always the fast rate.** The fit could return
+  k1 < k2 while the column said "k1 (fast)"; the pair is now swapped with
+  A → 1−A. `k2` and `k2_se` are reported too.
+- **`_fit_nonlinear` is table-driven.** Nine copied try/except blocks are now
+  one model-spec table and one loop; output is bit-for-bit identical
+  (golden-master test, `tests/test_golden_master.py`).
+- **Scientific helpers moved out of the UI.** `_C0_both`, `_initial_tof_site`,
+  `_initial_tof_mass`, `_arrhenius_ci` and `c_to_user` now live in
+  `catlab/metrics.py` (no Streamlit import) with their own tests.
+
 ## v3.6.0 (2026-09-25)
 
 ### Fixed

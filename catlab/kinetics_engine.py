@@ -4,9 +4,11 @@
 # concentration-unit converter. Used by both the Streamlit app (app_ods.py)
 # and the catlab CLI package.
 
+from functools import partial
+
 import numpy as np
 from scipy.optimize import curve_fit
-from scipy.integrate import odeint
+from scipy.special import lambertw
 
 # -- Constants ----------------------------------------------------
 MW_S = 32.06  # g/mol
@@ -206,17 +208,44 @@ def _elovich(t, alpha, beta, C0):
     return C0 - (1.0 / np.maximum(beta, 1e-15)) * np.log1p(
         np.maximum(alpha * beta * t, 0))
 
+def _lambertw_exp(y):
+    """W(exp(y)) for an array y, without overflow for large y.
+
+    For y < ~600 use scipy's lambertw directly.  For large y, exp(y) overflows
+    float64, so solve w + ln(w) = y by Newton's method instead (a few iterations
+    converge to ~1e-15 relative accuracy).
+    """
+    y = np.asarray(y, dtype=float)
+    scalar = y.ndim == 0
+    y = np.atleast_1d(y)
+    result = np.empty_like(y)
+    small = y < 600.0
+    if np.any(small):
+        with np.errstate(over="ignore", invalid="ignore"):
+            result[small] = lambertw(np.exp(y[small])).real
+    big = ~small
+    if np.any(big):
+        yb = y[big]
+        w = yb - np.log(yb)  # starting guess
+        for _ in range(50):
+            f = w + np.log(w) - yb
+            dw = f * w / (w + 1.0)  # Newton step for w + ln w - y = 0
+            w = w - dw
+            if np.all(np.abs(dw) <= 1e-15 * np.abs(w)):
+                break
+        result[big] = w
+    return result[0] if scalar else result
+
+
 def _lh_model(t, k_LH, K_ads, C0):
     t = np.asarray(t, dtype=float)
-    def dC(C, tt):
-        Cv = max(C[0], 0.0)
-        return [-k_LH * K_ads * Cv / (1.0 + K_ads * Cv)]
-    if t[0] == 0:
-        sol = odeint(dC, [C0], t, rtol=1e-6, atol=1e-9)
-        return np.maximum(sol.flatten(), 0.0)
-    t_full = np.concatenate(([0.0], t))
-    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
-    return np.maximum(sol.flatten()[1:], 0.0)
+    if k_LH <= 0.0 or K_ads <= 0.0:
+        return np.full_like(t, C0)
+    Kc = K_ads * C0
+    if Kc < 1e-10:
+        return np.maximum(C0 * np.exp(-k_LH * K_ads * t), 0.0)
+    C = _lambertw_exp(np.log(Kc) + Kc - k_LH * K_ads * t) / K_ads
+    return np.maximum(C, 0.0)
 
 # -- Additional Non-Linear Kinetic Models (v3.5.0) --------------
 def _power_law(t, k, n, C0):
@@ -258,12 +287,7 @@ def _power_law_t_half(C0, k, n):
 def _eley_rideal(t, k_er, K, C0):
     """Eley-Rideal: one species adsorbed, other reacts from bulk phase"""
     t = np.asarray(t, dtype=float)
-    def dC(C, tt):
-        Cv = max(float(C[0]), 1e-12)
-        return [-k_er * K * Cv]
-    t_full = np.concatenate(([0.0], t))
-    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
-    return np.maximum(sol.flatten()[1:], 0.0)
+    return np.maximum(C0 * np.exp(-k_er * K * t), 0.0)
 
 def _avrami(t, k_av, n_av, C0):
     """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
@@ -383,248 +407,170 @@ def _fmt_pm(val, se):
 
 
 # -- Non-linear fitting engine -----------------------------------
-def _fit_nonlinear(time, Ct, C0):
+def _anchor_mask(time, Ct, C0):
+    """Boolean mask of initial-condition points (t = 0 and C = C0).
+
+    C0 is locked in every model, and every model returns exactly C0 at t = 0,
+    so such a point has zero residual and zero Jacobian for all models by
+    construction.  It carries no information about the fit, but counting it
+    would add a free degree of freedom: n rises by one, R^2 rises (ss_tot
+    grows, ss_res does not), and AICc gaps between models shrink.  These
+    points are therefore left out of fitting and of every statistic.
+    A t = 0 point whose concentration differs from C0 (e.g. after a dark
+    adsorption step) is informative and is kept.
+    """
     t  = np.asarray(time, dtype=float)
     Ct = np.asarray(Ct,   dtype=float)
-    n  = len(t)
-    results = {}
+    return (t == 0) & np.isclose(Ct, C0, rtol=1e-9, atol=0.0)
 
-    # Zero-order
-    try:
-        p, pcov = curve_fit(lambda t_, k: _zero_order(t_, k, C0), t, Ct,
-                            p0=[1e-6], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        k0 = p[0]
-        pred = _zero_order(t, k0, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Zero-order"]
-        results["Zero-order"] = {
-            "params": (k0, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+
+# Post-processors build the model-specific result keys (label, t_half, k, ...).
+# Each takes (p, se, at_bound, C0) and returns the extra keys appended to the
+# common {"params", "R2", "pred", "adj_r2", "aic", "aicc"} block.
+def _post_zero(p, se, at_bound, C0):
+    k0 = p[0]
+    return {"label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
             "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
-            "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)", "r0": k0, "r0_se": se[0],
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Zero-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)",
+            "r0": k0, "r0_se": se[0]}
 
-    # Pseudo-first-order
-    try:
-        p, pcov = curve_fit(lambda t_, k: _first_order(t_, k, C0), t, Ct,
-                            p0=[0.01], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        kapp = p[0]
-        pred = _first_order(t, kapp, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Pseudo-first"]
-        r0 = kapp * C0
-        results["Pseudo-first"] = {
-            "params": (kapp, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
+def _post_first(p, se, at_bound, C0):
+    kapp = p[0]
+    r0 = kapp * C0
+    return {"label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
             "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
-            "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)", "r0": r0, "r0_se": se[0] * C0,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Pseudo-first"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)",
+            "r0": r0, "r0_se": se[0] * C0}
 
-    # Pseudo-second-order  (FIX T: concentration-based, k2 in L/mol/min)
-    try:
-        p, pcov = curve_fit(lambda t_, k: _second_order(t_, k, C0), t, Ct,
-                            p0=[1.0], bounds=([0], [np.inf]), maxfev=5000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        k2 = p[0]
-        pred = _second_order(t, k2, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Pseudo-second-order"]
-        r0 = k2 * C0 ** 2
-        results["Pseudo-second-order"] = {
-            "params": (k2, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+def _post_second(p, se, at_bound, C0):
+    k2 = p[0]
+    r0 = k2 * C0 ** 2
+    return {"label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
             "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
-            "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)", "r0": r0, "r0_se": se[0] * C0 ** 2,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Pseudo-second-order"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)",
+            "r0": r0, "r0_se": se[0] * C0 ** 2}
 
-    # Elovich
-    try:
-        p, pcov = curve_fit(lambda t_, a, b: _elovich(t_, a, b, C0), t, Ct,
-                            p0=[1e-4, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        alpha = p[0]
-        beta = p[1]
-        pred = _elovich(t, alpha, beta, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Elovich"]
-        results["Elovich"] = {
-            "params": (alpha, beta, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
+def _post_elovich(p, se, at_bound, C0):
+    alpha, beta = p
+    return {"label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
             "t_half": _elovich_t_half(C0, alpha, beta),
-            "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)", "r0": alpha, "r0_se": se[0],
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Elovich"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)",
+            "r0": alpha, "r0_se": se[0]}
 
-    # Langmuir-Hinshelwood
-    try:
-        p, pcov = curve_fit(lambda t_, kLH, Kads: _lh_model(t_, kLH, Kads, C0), t, Ct,
-                            p0=[0.01, 10.0], bounds=([0, 0], [np.inf, np.inf]), maxfev=10000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        k_LH = p[0]
-        K_ads = p[1]
-        pred = _lh_model(t, k_LH, K_ads, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["L-H"]
-        r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
-        _kc = K_ads * C0
-        _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
-        results["L-H"] = {
-            "params": (k_LH, K_ads, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
+def _post_lh(p, se, at_bound, C0):
+    k_LH, K_ads = p
+    r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
+    _kc = K_ads * C0
+    _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
+    return {"label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
             "t_half": _lh_t_half(C0, k_LH, K_ads),
-            "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)", "r0": r0, "r0_se": None,
-            "K_ads": K_ads, "K_se": se[1], "regime": _regime,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["L-H"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)",
+            "r0": r0, "r0_se": None,
+            "K_ads": K_ads, "K_se": se[1], "regime": _regime}
 
-    # Power-Law (General Reaction Order)
-    try:
-        f_pl = lambda t_, k, n_: _power_law(t_, k, n_, C0)
-        p, pcov = curve_fit(
-            f_pl,
-            t, Ct, p0=[0.01, 1.5],
-            bounds=([0, 0.1], [np.inf, 5.0]), maxfev=10000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        at_bound = _params_at_bound(f_pl, t, Ct, p, BOUNDED_SHAPE_PARAMS["Power-Law"])
-        if at_bound:
-            se = np.full_like(se, np.nan)
-        k_pl, n_pl = p
-        pred = _power_law(t, k_pl, n_pl, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Power-Law"]
-        r0 = k_pl * (C0 ** n_pl)
-        results["Power-Law"] = {
-            "params": (k_pl, n_pl, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
+def _post_power_law(p, se, at_bound, C0):
+    k_pl, n_pl = p
+    r0 = k_pl * (C0 ** n_pl)
+    return {"label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
             "t_half": _power_law_t_half(C0, k_pl, n_pl),
             "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
             "col_k": "k_PL", "r0": r0, "r0_se": None,
-            "at_bound": at_bound,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Power-Law"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "at_bound": at_bound}
 
-    # Eley-Rideal
-    try:
-        p, pcov = curve_fit(
-            lambda t_, k, K: _eley_rideal(t_, k, K, C0),
-            t, Ct, p0=[0.01, 10.0],
-            bounds=([0, 0], [np.inf, np.inf]), maxfev=8000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        k_er, K_er = p
-        pred = _eley_rideal(t, k_er, K_er, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Eley-Rideal"]
-        r0 = k_er * K_er * C0
-        results["Eley-Rideal"] = {
-            "params": (k_er, K_er, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
+def _post_eley(p, se, at_bound, C0):
+    k_er, K_er = p
+    r0 = k_er * K_er * C0
+    return {"label": f"k_ER={_fmt_sci(k_er)}, K={_fmt_sci(K_er)}",
             "t_half": float("nan"),
             "k": k_er, "k_se": se[0], "K_er": K_er, "K_er_se": se[1],
-            "col_k": "k_ER", "r0": r0, "r0_se": None,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Eley-Rideal"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "col_k": "k_ER", "r0": r0, "r0_se": None}
 
-    # Avrami
-    try:
-        f_av = lambda t_, k, n_: _avrami(t_, k, n_, C0)
-        p, pcov = curve_fit(
-            f_av,
-            t, Ct, p0=[0.01, 1.0],
-            bounds=([0, 0.1], [np.inf, 4.0]), maxfev=8000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        at_bound = _params_at_bound(f_av, t, Ct, p, BOUNDED_SHAPE_PARAMS["Avrami"])
-        if at_bound:
-            se = np.full_like(se, np.nan)
-        k_av, n_av = p
-        pred = _avrami(t, k_av, n_av, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Avrami"]
-        results["Avrami"] = {
-            "params": (k_av, n_av, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
+def _post_avrami(p, se, at_bound, C0):
+    k_av, n_av = p
+    return {"label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
             "t_half": float("nan"),
             "k": k_av, "k_se": se[0],
             "col_k": "k_Avrami", "r0": None, "r0_se": None,
-            "at_bound": at_bound,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Avrami"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "at_bound": at_bound}
 
-    # Double Exponential
-    try:
-        f_de = lambda t_, k1, k2, A: _double_exponential(t_, k1, k2, A, C0)
-        p, pcov = curve_fit(
-            f_de,
-            t, Ct, p0=[0.1, 0.01, 0.6],
-            bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000, **FIT_TOL)
-        se = np.sqrt(np.diag(pcov))
-        at_bound = _params_at_bound(f_de, t, Ct, p, BOUNDED_SHAPE_PARAMS["Double-Exponential"])
-        if at_bound:
-            se = np.full_like(se, np.nan)
-        k1, k2 = p[0], p[1]
-        A_frac = p[2]
-        pred = _double_exponential(t, k1, k2, A_frac, C0)
-        r2v = _r2(Ct, pred)
-        np_ = N_PARAMS["Double-Exponential"]
-        results["Double-Exponential"] = {
-            "params": (k1, k2, A_frac, C0), "R2": r2v, "pred": pred,
-            "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
-            "aicc": _aicc(Ct, pred, np_),
-            "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
+def _post_double_exponential(p, se, at_bound, C0):
+    k1, k2, A_frac = p
+    return {"label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
             "t_half": float("nan"),
-            "k": k1, "k_se": se[0],
+            "k": k1, "k_se": se[0], "k2": k2, "k2_se": se[1],
             "col_k": "k1 (fast)", "r0": None, "r0_se": None,
-            "at_bound": at_bound,
-        }
-    except (RuntimeError, ValueError) as e:
-        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
-    except Exception as e:
-        results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            "at_bound": at_bound}
 
+def _de_prepare(p, se):
+    """Force k1 (fast) >= k2 for Double-Exponential; the model is symmetric."""
+    if p[0] < p[1]:
+        p[0], p[1] = p[1], p[0]
+        p[2] = 1.0 - p[2]
+        se[0], se[1] = se[1], se[0]
+    return p, se
+
+
+# Model specs, in MODEL_NAMES order.  Each: (name, model func, p0, bounds,
+# maxfev, bounded-shape-flag, prepare-hook, post-hook).
+_MODEL_SPECS = [
+    ("Zero-order", _zero_order, [1e-6], ([0], [np.inf]), 5000, False, None, _post_zero),
+    ("Pseudo-first", _first_order, [0.01], ([0], [np.inf]), 5000, False, None, _post_first),
+    ("Pseudo-second-order", _second_order, [1.0], ([0], [np.inf]), 5000, False, None, _post_second),
+    ("Elovich", _elovich, [1e-4, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_elovich),
+    ("L-H", _lh_model, [0.01, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_lh),
+    ("Power-Law", _power_law, [0.01, 1.5], ([0, 0.1], [np.inf, 5.0]), 10000, True, None, _post_power_law),
+    ("Eley-Rideal", _eley_rideal, [0.01, 10.0], ([0, 0], [np.inf, np.inf]), 8000, False, None, _post_eley),
+    ("Avrami", _avrami, [0.01, 1.0], ([0, 0.1], [np.inf, 4.0]), 8000, True, None, _post_avrami),
+    ("Double-Exponential", _double_exponential, [0.1, 0.01, 0.6], ([0, 0, 0], [np.inf, np.inf, 1.0]), 10000, True, _de_prepare, _post_double_exponential),
+]
+
+
+def _fit_nonlinear(time, Ct, C0):
+    t_all  = np.asarray(time, dtype=float)
+    Ct_all = np.asarray(Ct,   dtype=float)
+    anchor = _anchor_mask(t_all, Ct_all, C0)
+    t  = t_all[~anchor]
+    Ct = Ct_all[~anchor]
+    n  = len(t)
+    results = {}
+
+    for name, func, p0, bounds, maxfev, bounded, prepare, post in _MODEL_SPECS:
+        f = partial(func, C0=C0)
+        try:
+            p, pcov = curve_fit(f, t, Ct, p0=p0, bounds=bounds, maxfev=maxfev, **FIT_TOL)
+            se = np.sqrt(np.diag(pcov))
+            if prepare is not None:
+                p, se = prepare(p, se)
+            if bounded:
+                at_bound = _params_at_bound(f, t, Ct, p, BOUNDED_SHAPE_PARAMS[name])
+                if at_bound:
+                    se = np.full_like(se, np.nan)
+            else:
+                at_bound = []
+            pred = f(t, *p)
+            r2v = _r2(Ct, pred)
+            np_ = N_PARAMS[name]
+            results[name] = {
+                "params": tuple(p) + (C0,), "R2": r2v, "pred": pred,
+                "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+                "aicc": _aicc(Ct, pred, np_),
+                **post(p, se, at_bound, C0),
+            }
+        except (RuntimeError, ValueError) as e:
+            results[name] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
+        except Exception as e:
+            results[name] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+
+    # Statistics above use the n informative points only.  "pred" is returned
+    # aligned with the caller's full time vector; anchor points are exactly C0
+    # for every model.
+    for r in results.values():
+        if "pred" in r:
+            pred_full = np.full(len(t_all), float(C0))
+            pred_full[~anchor] = r["pred"]
+            r["pred"] = pred_full
+        r["n_fit"] = n
+        r["n_anchor"] = int(anchor.sum())
     return results
 
 
@@ -729,12 +675,15 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
     clamped  = False
-    if len(rem_keep) >= MIN_FIT_POINTS:
+    # A t = 0, 0 % removal point is an anchor (see _anchor_mask): it is not
+    # fitted, so it must not count towards MIN_FIT_POINTS.
+    n_anchor = int(np.sum((t_keep == 0) & (rem_keep == 0)))
+    if len(rem_keep) - n_anchor >= MIN_FIT_POINTS:
         eq_rem = rem_keep[-1]
         cutoff = max_fractional_uptake * eq_rem
-        while len(rem_keep) > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
+        while len(rem_keep) - n_anchor > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
             excluded.append(float(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
-        clamped = len(rem_keep) <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
+        clamped = len(rem_keep) - n_anchor <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
     return excluded, t_keep, rem_keep, clamped
