@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **CSV uploads work in every tab.** All tabs read the same uploaded file and
+  `read_csv` left the cursor at its end, so on a CSV upload every tab after the
+  first showed "Cannot read file: Could not determine delimiter". The loader now
+  rewinds the file first. Excel uploads were not affected.
+- The app header and browser-tab title showed "v3.5.3"; they now read
+  `catlab.__version__`.
+
 ## v3.7.0 (2026-10-01)
 
 ### Added

@@ -15,6 +15,43 @@ import app_ods
 from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
 
 
+class TestRepeatedUploadReads:
+    """Regression: every tab calls _load_kinetic_data on the same uploaded
+    file.  read_csv left the cursor at the end, so on a CSV upload every tab
+    after the first failed with "Cannot read file: Could not determine
+    delimiter".  (Excel was unaffected: openpyxl seeks on its own.)"""
+
+    CSV = (b"Time (min),CatA Removal (%)\n0,0\n15,25\n30,44\n45,58\n"
+           b"60,68\n90,81\n120,88\n")
+
+    class _Upload(__import__("io").BytesIO):
+        name = "data.csv"
+
+    def test_csv_can_be_read_by_every_tab(self):
+        up = self._Upload(self.CSV)
+        for _ in range(9):                      # one read per tab
+            df, time_col, removal_cols = app_ods._load_kinetic_data(up)
+            assert df is not None and df.shape == (7, 2)
+            assert time_col == "Time (min)"
+
+    def test_app_csv_upload_has_no_errors_in_any_tab(self):
+        from streamlit.testing.v1 import AppTest
+        at = AppTest.from_file(
+            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"),
+            default_timeout=180).run()
+        at.file_uploader(key="shared_file").upload("data.csv", self.CSV, "text/csv").run()
+        assert not at.exception
+        assert not [e.value for e in at.error if "Cannot read file" in e.value]
+
+    def test_header_shows_package_version(self):
+        from streamlit.testing.v1 import AppTest
+        import catlab
+        at = AppTest.from_file(
+            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"),
+            default_timeout=180).run()
+        assert any(f"v{catlab.__version__}" in m.value for m in at.markdown)
+
+
 class TestTimeUnitSuspicious:
     """The time-column header is checked for non-minute units, without ever
     flagging "Time (min)" itself."""
