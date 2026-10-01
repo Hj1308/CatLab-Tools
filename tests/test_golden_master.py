@@ -12,15 +12,19 @@ from catlab.kinetics_engine import (
 
 C0 = 7.798e-3
 T = np.array([0, 15, 30, 45, 60, 90, 120.0])
+T_ANCHOR = np.array([0, 15, 30, 45, 60, 90, 120, 180.0])
 
-# (seed, generator) — mirrors the generator that produced golden_fit.json.
+# (name, seed, time grid, generator) — mirrors the generator that produced
+# golden_fit.json.  PFO-anchor includes a (t=0, C0) anchor point on an 8-point
+# grid; its golden values were produced by the pre-refactor engine.
 _GEN = [
-    ("PFO",        0, lambda: _first_order(T, 0.02, C0)),
-    ("PSO",        1, lambda: _second_order(T, 4.0, C0)),
-    ("L-H",        2, lambda: _lh_model(T, 0.0001, 300.0, C0)),
-    ("Elovich",    3, lambda: _elovich(T, 1e-4, 500.0, C0)),
-    ("Avrami",     4, lambda: _avrami(T, 0.003, 2.0, C0)),
-    ("Double-Exp", 5, lambda: _double_exponential(T, 0.005, 0.08, 0.3, C0)),
+    ("PFO",        0, T,        lambda t: _first_order(t, 0.02, C0)),
+    ("PSO",        1, T,        lambda t: _second_order(t, 4.0, C0)),
+    ("L-H",        2, T,        lambda t: _lh_model(t, 0.0001, 300.0, C0)),
+    ("Elovich",    3, T,        lambda t: _elovich(t, 1e-4, 500.0, C0)),
+    ("Avrami",     4, T,        lambda t: _avrami(t, 0.003, 2.0, C0)),
+    ("Double-Exp", 5, T,        lambda t: _double_exponential(t, 0.005, 0.08, 0.3, C0)),
+    ("PFO-anchor", 6, T_ANCHOR, lambda t: _first_order(t, 0.02, C0)),
 ]
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "golden_fit.json")
@@ -28,12 +32,12 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "golden_fit.json")
 
 def _compute_results():
     results = {}
-    for name, seed, gen in _GEN:
+    for name, seed, tgrid, gen in _GEN:
         rng = np.random.default_rng(seed)
-        clean = gen()
+        clean = gen(tgrid)
         Ct = clean * (1.0 + 0.03 * rng.standard_normal(len(clean)))
         Ct[0] = C0
-        results[name] = _fit_nonlinear(T, Ct, C0)
+        results[name] = _fit_nonlinear(tgrid, Ct, C0)
     return results
 
 
@@ -69,8 +73,8 @@ def test_golden_master():
     assert golden["C0"] == C0
     np.testing.assert_allclose(golden["T"], T, rtol=1e-12)
 
-    assert set(golden["datasets"]) == {n for n, _, _ in _GEN}
-    for name, _, _ in _GEN:
+    assert set(golden["datasets"]) == {n for n, _, _, _ in _GEN}
+    for name, _, _, _ in _GEN:
         assert set(golden["datasets"][name]) == set(MODEL_NAMES)
         for m in MODEL_NAMES:
             _compare(golden["datasets"][name][m], fresh[name][m])
