@@ -26,6 +26,15 @@ class TestTimeUnitSuspicious:
         ("Time (hr)", True),
         ("time_hours", True),
         ("Time (s)", True),
+        ("Time (hrs)", True),
+        ("Time [h]", True),
+        ("t/h", True),
+        ("Time, h", True),
+        ("Time (sec)", True),
+        ("48h", True),
+        ("Time (minutes)", False),
+        ("Reaction time", False),
+        ("Times", False),
     ])
     def test_header_detection(self, header, expected):
         assert app_ods._time_unit_suspicious(header) is expected

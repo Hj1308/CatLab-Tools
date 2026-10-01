@@ -1,4 +1,4 @@
-# Exact versions the test suite was last verified with.
+# Exact versions the test suite was last verified with (these releases need Python >= 3.11).
 numpy==2.4.6
 scipy==1.17.1
 pandas==3.0.3

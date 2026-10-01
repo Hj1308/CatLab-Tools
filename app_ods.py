@@ -116,16 +116,18 @@ SOLVENTS = {
 # SHARED HELPERS
 # ================================================================
 
+_NON_MINUTE_UNITS = {"h", "hr", "hrs", "hour", "hours",
+                     "s", "sec", "secs", "second", "seconds"}
+
+
 def _time_unit_suspicious(header):
     """True when a time-column header looks like it is not in minutes.
 
-    Matches "(h)", "hour", "(s)", "sec" and the whole word "hr" so that
-    "Time (min)" never triggers a warning.
+    The header is split into letter runs, so "Time (h)", "Time [hrs]", "t/h",
+    "Time, s" and "time_hours" are flagged while "Time (min)" and
+    "Time (minutes)" are not.
     """
-    h = str(header).lower()
-    if "(h)" in h or "hour" in h or "(s)" in h or "sec" in h:
-        return True
-    return re.search(r"\bhr\b", h) is not None
+    return any(w in _NON_MINUTE_UNITS for w in re.findall(r"[a-z]+", str(header).lower()))
 
 
 # -- FIX I: Centralised data loader ------------------------------
