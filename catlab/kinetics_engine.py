@@ -6,7 +6,7 @@
 
 import numpy as np
 from scipy.optimize import curve_fit
-from scipy.integrate import odeint
+from scipy.special import lambertw
 
 # -- Constants ----------------------------------------------------
 MW_S = 32.06  # g/mol
@@ -206,17 +206,44 @@ def _elovich(t, alpha, beta, C0):
     return C0 - (1.0 / np.maximum(beta, 1e-15)) * np.log1p(
         np.maximum(alpha * beta * t, 0))
 
+def _lambertw_exp(y):
+    """W(exp(y)) for an array y, without overflow for large y.
+
+    For y < ~600 use scipy's lambertw directly.  For large y, exp(y) overflows
+    float64, so solve w + ln(w) = y by Newton's method instead (a few iterations
+    converge to ~1e-15 relative accuracy).
+    """
+    y = np.asarray(y, dtype=float)
+    scalar = y.ndim == 0
+    y = np.atleast_1d(y)
+    result = np.empty_like(y)
+    small = y < 600.0
+    if np.any(small):
+        with np.errstate(over="ignore", invalid="ignore"):
+            result[small] = lambertw(np.exp(y[small])).real
+    big = ~small
+    if np.any(big):
+        yb = y[big]
+        w = yb - np.log(yb)  # starting guess
+        for _ in range(50):
+            f = w + np.log(w) - yb
+            dw = f * w / (w + 1.0)  # Newton step for w + ln w - y = 0
+            w = w - dw
+            if np.all(np.abs(dw) <= 1e-15 * np.abs(w)):
+                break
+        result[big] = w
+    return result[0] if scalar else result
+
+
 def _lh_model(t, k_LH, K_ads, C0):
     t = np.asarray(t, dtype=float)
-    def dC(C, tt):
-        Cv = max(C[0], 0.0)
-        return [-k_LH * K_ads * Cv / (1.0 + K_ads * Cv)]
-    if t[0] == 0:
-        sol = odeint(dC, [C0], t, rtol=1e-6, atol=1e-9)
-        return np.maximum(sol.flatten(), 0.0)
-    t_full = np.concatenate(([0.0], t))
-    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
-    return np.maximum(sol.flatten()[1:], 0.0)
+    if k_LH <= 0.0 or K_ads <= 0.0:
+        return np.full_like(t, C0)
+    Kc = K_ads * C0
+    if Kc < 1e-10:
+        return np.maximum(C0 * np.exp(-k_LH * K_ads * t), 0.0)
+    C = _lambertw_exp(np.log(Kc) + Kc - k_LH * K_ads * t) / K_ads
+    return np.maximum(C, 0.0)
 
 # -- Additional Non-Linear Kinetic Models (v3.5.0) --------------
 def _power_law(t, k, n, C0):
@@ -258,12 +285,7 @@ def _power_law_t_half(C0, k, n):
 def _eley_rideal(t, k_er, K, C0):
     """Eley-Rideal: one species adsorbed, other reacts from bulk phase"""
     t = np.asarray(t, dtype=float)
-    def dC(C, tt):
-        Cv = max(float(C[0]), 1e-12)
-        return [-k_er * K * Cv]
-    t_full = np.concatenate(([0.0], t))
-    sol = odeint(dC, [C0], t_full, rtol=1e-6, atol=1e-9)
-    return np.maximum(sol.flatten()[1:], 0.0)
+    return np.maximum(C0 * np.exp(-k_er * K * t), 0.0)
 
 def _avrami(t, k_av, n_av, C0):
     """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
@@ -622,6 +644,10 @@ def _fit_nonlinear(time, Ct, C0):
             t, Ct, p0=[0.1, 0.01, 0.6],
             bounds=([0, 0, 0], [np.inf, np.inf, 1.0]), maxfev=10000, **FIT_TOL)
         se = np.sqrt(np.diag(pcov))
+        if p[0] < p[1]:
+            p[0], p[1] = p[1], p[0]
+            p[2] = 1.0 - p[2]
+            se[0], se[1] = se[1], se[0]
         at_bound = _params_at_bound(f_de, t, Ct, p, BOUNDED_SHAPE_PARAMS["Double-Exponential"])
         if at_bound:
             se = np.full_like(se, np.nan)
@@ -636,7 +662,7 @@ def _fit_nonlinear(time, Ct, C0):
             "aicc": _aicc(Ct, pred, np_),
             "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
             "t_half": float("nan"),
-            "k": k1, "k_se": se[0],
+            "k": k1, "k_se": se[0], "k2": k2, "k2_se": se[1],
             "col_k": "k1 (fast)", "r0": None, "r0_se": None,
             "at_bound": at_bound,
         }
