@@ -109,7 +109,7 @@ class TestHelpers:
 # ─────────────────────────────────────────────────────────────────
 # Roadmap phase 1 — one model-selection criterion across the repo.
 # Before this change, KineticsAnalyser.best_fit() selected by max(R2)
-# over 4 models while app_ods.py selected by AICc over 9.  On the L-H
+# over 4 models while app_ods.py selected by AICc over 8.  On the L-H
 # fixture below the package API returned "Zero-order" while the app
 # returned "L-H" with an Akaike weight of ~0.9997 (Zero-order sat at
 # dAICc = 27.52).  These tests pin the two interfaces together.

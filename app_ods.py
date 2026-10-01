@@ -28,7 +28,7 @@ FIX L (v3.3): Download zip in Tab 1 now includes fitted curves, not just raw dat
 NEW N (v3.4): Tab 8 — Arrhenius Multi-Temperature Analysis (extract Ea & A with 95% CI).
 NEW O (v3.4): Tab 9 — Residual Diagnostics (residuals, Q-Q, Shapiro-Wilk, runs test).
 NEW P (v3.4.1): create_advanced_template() — Excel template pre-filled with sidebar settings.
-v3.5.0 models: Power-Law, Eley-Rideal, Avrami, Double-Exponential added.
+v3.5.0 models: Power-Law, Avrami, Double-Exponential added.
 
 v3.5.2 — Tab 1 data preparation controls
 NEW AC: Auto-inject t=0 (Removal=0%, C=C₀) when missing from uploaded data.
@@ -97,7 +97,7 @@ from catlab.kinetics_engine import (
     MIN_FIT_POINTS,
     COLORS, MARKERS,
     _zero_order, _first_order, _second_order, _elovich, _lh_model,
-    _power_law, _eley_rideal, _avrami, _double_exponential,
+    _power_law, _avrami, _double_exponential,
     _r2,
     _fmt_sci, _fmt_thalf, _fmt_pm,
     _fit_nonlinear, _best_model, _auto_saturation_exclusions,
@@ -293,7 +293,7 @@ models (too few points for their parameters) are excluded, but all kinetic
 models including zero-order compete on equal footing.
 
 **Model classes:**
-- *Mechanistic*: L-H, Eley-Rideal (surface-reaction based)
+- *Mechanistic*: L-H (surface-reaction based)
 - *Simplified mechanistic*: Zero-, Pseudo-first-, Pseudo-second-order, Power-Law
 - *Phenomenological / empirical*: Elovich (chemisorption heterogeneity),
   Avrami (nucleation/growth — uncommon in ODS; use with caution),
@@ -415,7 +415,6 @@ def _fit_curve(model, params, t_fine, C0):
     elif model == "Elovich":             return _elovich(t_fine, params[0], params[1], C0)
     elif model == "L-H":                 return _lh_model(t_fine, params[0], params[1], C0)
     elif model == "Power-Law":           return _power_law(t_fine, params[0], params[1], C0)
-    elif model == "Eley-Rideal":         return _eley_rideal(t_fine, params[0], params[1], C0)
     elif model == "Avrami":              return _avrami(t_fine, params[0], params[1], C0)
     elif model == "Double-Exponential":  return _double_exponential(t_fine, params[0], params[1], params[2], C0)
     return _lh_model(t_fine, params[0], params[1], C0)
@@ -749,7 +748,7 @@ def _tab_kinetics(cfg, uploaded):
             y_lbl     = f"1/C  ({u_label})⁻¹"
             title_lin = f"{cat_label} — Pseudo-second-order  |  1/C vs t"
         elif best in ("Pseudo-first", "Zero-order", "Power-Law",
-                      "Eley-Rideal", "Avrami", "L-H",
+                      "Avrami", "L-H",
                       "Elovich", "Double-Exponential"):
             # ln(C₀/C) vs t — valid for first-order regime; informative for others
             ratio  = np.maximum(C0_user / np.maximum(C_user, 1e-15), 1e-15)
@@ -874,12 +873,6 @@ def _tab_kinetics(cfg, uploaded):
             for m in model_names:
                 mr = res[m]
                 note = ""
-                if m == "Eley-Rideal":
-                    note = ("⚠️ Fit for completeness/comparison only — structurally "
-                            "redundant with Pseudo-first-order (low coverage) or "
-                            "Langmuir-Hinshelwood (general coverage) under "
-                            "excess-oxidant conditions; never eligible for best-model "
-                            "selection. k_ER and K are not individually identifiable.")
                 if mr.get("at_bound"):
                     note = ("⚠️ " + "; ".join(mr["at_bound"]) + " — the bound, "
                             "not the data, sets this value, so the SE is not a "

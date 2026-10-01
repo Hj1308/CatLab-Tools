@@ -69,7 +69,7 @@ class TestAutoSaturationDetection:
     removal 91% → cutoff 77.35% at 0.85; every point above the cutoff is
     dropped, not just the last one (the old increment-based rule dropped only the
     final point here). The retained set is never allowed to fall below
-    MIN_FIT_POINTS, which keeps AICc finite for the whole 9-model portfolio; a
+    MIN_FIT_POINTS, which keeps AICc finite for the whole 8-model portfolio; a
     cutoff that would strip below the floor reports `clamped=True` instead.
     A (t=0, 0 %) point is an anchor, never fitted, so it does not count
     towards that floor: the 7-point T below has 6 informative points.

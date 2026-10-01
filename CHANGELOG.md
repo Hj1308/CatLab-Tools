@@ -33,6 +33,12 @@
   `_initial_tof_mass`, `_arrhenius_ci` and `c_to_user` now live in
   `catlab/metrics.py` (no Streamlit import) with their own tests.
 
+### Removed
+- **Eley-Rideal model removed.** Under excess oxidant its rate law
+  `dC/dt = -k_ER·K·C` is Pseudo-first-order with an extra unidentifiable
+  parameter, so it only confused the results table. `BEST_MODEL_EXCLUDE` is
+  kept as an empty extension point.
+
 ## v3.6.0 (2026-09-25)
 
 ### Fixed
