@@ -1,6 +1,6 @@
-numpy
-pandas
-matplotlib
-scipy
-openpyxl
-streamlit
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+matplotlib>=3.7
+streamlit>=1.30
+openpyxl>=3.1

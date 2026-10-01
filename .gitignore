@@ -9,6 +9,11 @@ __pycache__/
 venv/
 env/
 
+# Build artifacts
+*.egg-info/
+build/
+dist/
+
 # Jupyter
 .ipynb_checkpoints/
 

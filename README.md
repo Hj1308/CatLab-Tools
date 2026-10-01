@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753373.svg)](https://doi.org/10.5281/zenodo.20753373)
 ![Version](https://img.shields.io/badge/version-v3.6.0-blue?style=flat-square)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square&logo=python)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
@@ -32,6 +32,15 @@ git clone https://github.com/Hj1308/CatLab-Tools.git
 cd CatLab-Tools
 pip install -r requirements.txt
 streamlit run app_ods.py
+```
+
+Alternatively, install the package with its app extras (or an exact reproduction
+via the lock file):
+
+```bash
+pip install -e .[app]
+# or, for an exact reproduction of the verified dependency set:
+pip install -r requirements-lock.txt
 ```
 
 ---
