@@ -41,6 +41,7 @@ from catlab.kinetics_engine import (
     _fit_nonlinear, _best_model, _auto_saturation_exclusions,
     _anchor_mask,
 )
+from catlab import __version__
 from catlab.metrics import _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user
 
 # Re-exported for backward compatibility (tests/test_app_ods.py).
@@ -51,7 +52,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="scipy")
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
 # -- Page config (must be first Streamlit call) -----------------
-st.set_page_config(page_title="ODS Calculation Suite v3.5.3", page_icon="🔬", layout="wide")
+st.set_page_config(page_title=f"ODS Calculation Suite v{__version__}", page_icon="🔬", layout="wide")
 
 # -- Matplotlib style --------------------------------------------
 plt.rcParams.update({
@@ -132,6 +133,9 @@ def _time_unit_suspicious(header):
 
 # -- FIX I: Centralised data loader ------------------------------
 def _load_kinetic_data(uploaded):
+    # Every tab reads the same UploadedFile; read_csv leaves the cursor at the
+    # end, so without a rewind every tab after the first saw an empty CSV.
+    uploaded.seek(0)
     try:
         if uploaded.name.endswith(".xlsx") or uploaded.name.endswith(".xls"):
             xl = pd.ExcelFile(uploaded)
@@ -1838,7 +1842,7 @@ def main():
 <div style='background:linear-gradient(90deg,#1a1a2e,#16213e);
             padding:18px 24px;border-radius:10px;margin-bottom:16px'>
   <h2 style='color:#e0e0e0;margin:0'>🔬 ODS Calculation Suite
-    <span style='font-size:0.6em;color:#aaa'> v3.5.3 — CatLab-Tools</span></h2>
+    <span style='font-size:0.6em;color:#aaa'> v""" + __version__ + """ — CatLab-Tools</span></h2>
   <p style='color:#aaa;margin:4px 0 0'>
     Oxidative Desulfurization Kinetics &amp; Analysis |
     Author: Hoda Jafari |
