@@ -17,6 +17,16 @@
   the raw-data table and saturation messages.
 - Removed the unused `openai` dependency from `requirements.txt`.
 
+### Changed
+- **Langmuir-Hinshelwood uses its exact closed form.** C(t) = W(K·C₀·e^(K·C₀−k·K·t))/K
+  (Lambert W) replaces `odeint` (rtol 1e-6), whose error was far above the fit
+  tolerance (gtol 1e-10) and made the finite-difference Jacobian noisy.
+  Agrees with a 50-digit mpmath reference to ~1e-15 relative. Eley-Rideal
+  uses its closed form C₀·e^(−k·K·t); `odeint` is no longer imported.
+- **Double-Exponential: k1 is always the fast rate.** The fit could return
+  k1 < k2 while the column said "k1 (fast)"; the pair is now swapped with
+  A → 1−A. `k2` and `k2_se` are reported too.
+
 ## v3.6.0 (2026-09-25)
 
 ### Fixed
