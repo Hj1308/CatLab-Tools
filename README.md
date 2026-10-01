@@ -310,10 +310,19 @@ CatLab-Tools/
 
 ## Cite This Software
 
-If you use CatLab-Tools in your research, please cite:
+If you use CatLab-Tools in your research, please cite the version you used:
 
-> Jafari, H. (2026). *CatLab-Tools: ODS Calculation Suite* (v3.7.0). Zenodo.
-> DOI: [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373)
+> Jafari, H. (2026). *CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite* (v3.7.0). Zenodo.
+> DOI: [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566)
+
+| DOI | Resolves to |
+|-----|-------------|
+| [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566) | v3.7.0 only — cite this for results produced with v3.7.0 |
+| [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) | All versions (always the latest release) |
+
+Results from v3.7.0 differ slightly from earlier versions (the t=0 point is no
+longer counted as data, and L-H uses its exact solution); cite the version-specific
+DOI so the numbers can be reproduced.
 
 ---
 
