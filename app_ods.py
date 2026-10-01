@@ -104,6 +104,7 @@ from catlab.kinetics_engine import (
     _elovich_t_half, _lh_t_half,
     _fmt_sci, _fmt_thalf, _fmt_pm,
     _fit_nonlinear, _get_valid_models, _best_model, _auto_saturation_exclusions,
+    _anchor_mask,
 )
 
 # FIX E: scope warnings filter — don't suppress everything
@@ -511,10 +512,12 @@ def _tab_kinetics(cfg, uploaded):
     add_t0 = st.checkbox(
         "Auto-add t=0 point (Removal=0%, C=C₀)",
         value=(not has_t0),
-        help="Recommended when t=0 is missing. Anchors the fit at C₀ — "
-             "improves pseudo-second-order and L-H detection.")
+        help="Adds the (t=0, C₀) point to plots and tables. C₀ is already locked "
+             "in every model, so this point is fitted exactly by construction and "
+             "is NOT counted in n, R², AICc or the residual statistics.")
     if add_t0 and not has_t0:
-        st.info("✅ t=0 will be added automatically to all catalysts before fitting.")
+        st.info("✅ t=0 will be shown for all catalysts (display only — C₀ is locked, "
+                "so it does not change the fit or its statistics).")
     elif add_t0 and has_t0:
         st.info("ℹ️ t=0 already present — no duplication.")
 
@@ -526,7 +529,9 @@ def _tab_kinetics(cfg, uploaded):
             st.session_state[f"excl_{col}"] = []
 
     st.markdown("**Point exclusion per catalyst** — select outlier / saturation points:")
-    t_labels  = [f"t = {int(ti)} min" for ti in t_raw]
+    # Labels map back to the exact time value; int() would merge 7.5 into 7.
+    t_label_map = {f"t = {ti:g} min": float(ti) for ti in t_raw}
+    t_labels    = list(t_label_map)
     n_cols_ui = min(len(removal_cols), 3)
     cols_ui   = st.columns(n_cols_ui)
     excl_per_cat = {}
@@ -538,13 +543,7 @@ def _tab_kinetics(cfg, uploaded):
                 options=t_labels, default=[],
                 key=f"excl_{col}",
                 help=f"Excluded points shown as open markers on the plot.")
-            excl_times = set()
-            for lbl in excl:
-                try:
-                    excl_times.add(float(lbl.replace("t = ","").replace(" min","")))
-                except Exception:
-                    pass
-            excl_per_cat[col] = excl_times
+            excl_per_cat[col] = {t_label_map[lbl] for lbl in excl if lbl in t_label_map}
 
     st.markdown("---")
 
@@ -653,7 +652,7 @@ def _tab_kinetics(cfg, uploaded):
         Ct_fit_per_cat[col] = Ct_fit
         # Show diagnostic before fitting
         n_excl = len(excl_times)
-        n_pts  = len(t_fit)
+        n_pts  = int(np.sum(~_anchor_mask(t_fit, Ct_fit, C0)))  # t=0 anchor not counted
         if n_excl > 0:
             st.caption(f"  {col.replace(' Removal (%)','').strip()}: "
                        f"{n_pts} points used ({n_excl} excluded)")
@@ -691,7 +690,7 @@ def _tab_kinetics(cfg, uploaded):
                     st.info(
                         f"ℹ️ **{cat_label}**: best model changes "
                         f"**{best_all} → {best_nl}** when "
-                        f"t = {int(t_fit_s[-1])} min is excluded. "
+                        f"t = {t_fit_s[-1]:g} min is excluded. "
                         f"Possible saturation — consider excluding it above.")
     except Exception:
         pass  # saturation detection is advisory only — never block main results
@@ -724,7 +723,7 @@ def _tab_kinetics(cfg, uploaded):
                 C_t = C0 * (1 - rem / 100.0)
                 row = {
                     "Catalyst":    cat_label2,
-                    "Time (min)":  int(ti),
+                    "Time (min)":  float(ti),
                     "Removal (%)": round(rem, 2),
                     "C (mmol/L)":  round(C_t * 1000, 4),
                 }
@@ -902,7 +901,7 @@ def _tab_kinetics(cfg, uploaded):
                     r2_without   = r2_with
                 det_rows.append({
                     "Catalyst":                 cat_label,
-                    "Auto-excluded t (min)":    ", ".join(str(int(x)) for x in sorted(excl_pts)) if excl_pts else "—",
+                    "Auto-excluded t (min)":    ", ".join(f"{x:g}" for x in sorted(excl_pts)) if excl_pts else "—",
                     "Best model WITHOUT excl.": best_without or "—",
                     "R² (without)":             f"{r2_without:.4f}" if not np.isnan(r2_without) else "—",
                     "Best model WITH excl.":    best_with or "—",
@@ -1829,6 +1828,14 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     with col2: model_choice = st.selectbox("Select model",    model_names,  key="resid_model")
     removal = df[cat_choice].dropna().values[:len(t)].astype(float)
     Ct_obs  = C0 * (1 - removal / 100.0)
+    # The (t=0, C0) anchor has zero residual by construction (C0 is locked);
+    # keeping it would bias sigma, Shapiro-Wilk and the runs test.
+    informative = ~_anchor_mask(t[:len(Ct_obs)], Ct_obs, C0)
+    if not informative.all():
+        st.caption("t = 0 (C = C₀) is excluded from the residual statistics: "
+                   "C₀ is locked, so every model fits it exactly.")
+    t      = t[:len(Ct_obs)][informative]
+    Ct_obs = Ct_obs[informative]
     all_res = _fit_nonlinear(t, Ct_obs, C0)
     res = all_res[model_choice]
     if not res.get("converged", True):

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The t=0 point no longer inflates the statistics.** C₀ is locked in every
+  model, so a (t=0, C₀) point is fitted exactly by construction. It used to
+  count as data: n rose by one, R² rose, and AICc gaps between models shrank
+  (on a noisy PFO curve the L-H gap fell from 6.0 to 4.4, inside reach of the
+  2.5 parsimony window). Such points are now left out of fitting, R², AICc,
+  the auto-saturation floor and the Tab 9 residual statistics. "Auto-add t=0"
+  is now display-only. A t=0 point below C₀ (e.g. after dark adsorption) is
+  still fitted.
+- **Manual exclusion works for fractional times.** Tab 1 built the exclusion
+  labels with `int()`, so excluding 7.5 min matched nothing (or removed a
+  7 min point instead). Times are now shown and matched exactly, here and in
+  the raw-data table and saturation messages.
+- Removed the unused `openai` dependency from `requirements.txt`.
+
 ## v3.6.0 (2026-09-25)
 
 ### Fixed

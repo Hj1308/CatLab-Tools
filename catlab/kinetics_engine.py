@@ -383,9 +383,29 @@ def _fmt_pm(val, se):
 
 
 # -- Non-linear fitting engine -----------------------------------
-def _fit_nonlinear(time, Ct, C0):
+def _anchor_mask(time, Ct, C0):
+    """Boolean mask of initial-condition points (t = 0 and C = C0).
+
+    C0 is locked in every model, and every model returns exactly C0 at t = 0,
+    so such a point has zero residual and zero Jacobian for all models by
+    construction.  It carries no information about the fit, but counting it
+    would add a free degree of freedom: n rises by one, R^2 rises (ss_tot
+    grows, ss_res does not), and AICc gaps between models shrink.  These
+    points are therefore left out of fitting and of every statistic.
+    A t = 0 point whose concentration differs from C0 (e.g. after a dark
+    adsorption step) is informative and is kept.
+    """
     t  = np.asarray(time, dtype=float)
     Ct = np.asarray(Ct,   dtype=float)
+    return (t == 0) & np.isclose(Ct, C0, rtol=1e-9, atol=0.0)
+
+
+def _fit_nonlinear(time, Ct, C0):
+    t_all  = np.asarray(time, dtype=float)
+    Ct_all = np.asarray(Ct,   dtype=float)
+    anchor = _anchor_mask(t_all, Ct_all, C0)
+    t  = t_all[~anchor]
+    Ct = Ct_all[~anchor]
     n  = len(t)
     results = {}
 
@@ -625,6 +645,16 @@ def _fit_nonlinear(time, Ct, C0):
     except Exception as e:
         results["Double-Exponential"] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
 
+    # Statistics above use the n informative points only.  "pred" is returned
+    # aligned with the caller's full time vector; anchor points are exactly C0
+    # for every model.
+    for r in results.values():
+        if "pred" in r:
+            pred_full = np.full(len(t_all), float(C0))
+            pred_full[~anchor] = r["pred"]
+            r["pred"] = pred_full
+        r["n_fit"] = n
+        r["n_anchor"] = int(anchor.sum())
     return results
 
 
@@ -729,12 +759,15 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
     clamped  = False
-    if len(rem_keep) >= MIN_FIT_POINTS:
+    # A t = 0, 0 % removal point is an anchor (see _anchor_mask): it is not
+    # fitted, so it must not count towards MIN_FIT_POINTS.
+    n_anchor = int(np.sum((t_keep == 0) & (rem_keep == 0)))
+    if len(rem_keep) - n_anchor >= MIN_FIT_POINTS:
         eq_rem = rem_keep[-1]
         cutoff = max_fractional_uptake * eq_rem
-        while len(rem_keep) > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
+        while len(rem_keep) - n_anchor > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
             excluded.append(float(t_keep[-1]))
             t_keep   = t_keep[:-1]
             rem_keep = rem_keep[:-1]
-        clamped = len(rem_keep) <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
+        clamped = len(rem_keep) - n_anchor <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
     return excluded, t_keep, rem_keep, clamped
