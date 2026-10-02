@@ -692,6 +692,21 @@ def _tab_kinetics(cfg, uploaded):
             )
         all_results[col] = _fit_nonlinear(t_fit, Ct_fit, C0)
 
+        # Warn once per catalyst when there are too few informative points for
+        # AICc model selection to be trustworthy (the t=0 anchor is not counted).
+        n_fit = next(
+            (all_results[col][m]["n_fit"] for m in model_names if "n_fit" in all_results[col][m]),
+            None,
+        )
+        if n_fit is not None and n_fit < MIN_FIT_POINTS:
+            cat_label = col.replace(" Removal (%)", "").strip()
+            st.warning(
+                f"⚠️ {cat_label}: only {n_fit} informative data points (t = 0 not counted). "
+                f"With fewer than {MIN_FIT_POINTS} points, AICc penalises every 2-parameter "
+                f"model heavily and cannot evaluate 3-parameter models, so the selected model "
+                f"is not reliable. Add measurements (especially early times, e.g. 5-10 min)."
+            )
+
     if not all_results:
         return
 
@@ -919,6 +934,7 @@ def _tab_kinetics(cfg, uploaded):
                 "Adj-R²": br.get("adj_r2", "N/A"),
                 "AICc": br.get("aicc", "N/A"),
                 "AIC": br.get("aic", "N/A"),
+                "n (fitted)": br.get("n_fit", ""),
                 "t½ (min)": _fmt_thalf(t_half),
                 "r₀ (mol/L/min)": _fmt_sci(r0),
                 "r₀/m (mol/g/min)": _fmt_sci(r0_m),

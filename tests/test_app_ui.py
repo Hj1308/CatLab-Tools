@@ -14,6 +14,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from catlab.kinetics_engine import MODEL_NAMES
+from tests.synthetic_data import SYNTHETIC_REMOVAL, T_SPARSE
 
 pytestmark = pytest.mark.ui
 
@@ -148,6 +149,27 @@ class TestTabKinetics:
         assert list(r2_with.index) == list(r2_without.index)
         for cat in r2_with.index:
             assert np.isclose(r2_with[cat], r2_without[cat], rtol=1e-9)
+
+    def test_five_point_dataset_warns_too_few_points(self, app):
+        rem = SYNTHETIC_REMOVAL["B_initial_drop"]
+        rows = ["Time (min),CatA Removal (%)"]
+        rows += [f"{t},{r}" for t, r in zip(T_SPARSE, rem)]
+        data = ("\n".join(rows) + "\n").encode("utf-8")
+        _upload_csv(app, data)
+        _run_analysis(app)
+        assert any("informative data points" in w.value for w in app.tabs[0].warning)
+
+    def test_seven_point_dataset_has_no_too_few_points_warning(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        _run_analysis(app)
+        assert not any("informative data points" in w.value for w in app.tabs[0].warning)
+
+    def test_summary_has_n_fitted_column(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        _run_analysis(app)
+        summary = _summary(app)
+        assert summary is not None
+        assert "n (fitted)" in summary.columns
 
 
 # ================================================================
