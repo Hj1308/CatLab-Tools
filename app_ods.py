@@ -45,6 +45,7 @@ from catlab.kinetics_engine import (
     _power_law,
     _avrami,
     _double_exponential,
+    _first_order_drop,
     _r2,
     _fmt_sci,
     _fmt_thalf,
@@ -290,6 +291,7 @@ models including zero-order compete on equal footing.
 **Model classes:**
 - *Mechanistic*: L-H (surface-reaction based)
 - *Simplified mechanistic*: Zero-, Pseudo-first-, Pseudo-second-order, Power-Law
+- *Semi-empirical*: Pseudo-first (initial drop) — two-stage (fast initial step + first-order)
 - *Phenomenological / empirical*: Elovich (chemisorption heterogeneity),
   Avrami (nucleation/growth — uncommon in ODS; use with caution),
   Double-Exponential (two-site parallel decay — high overfitting risk with < 10 points)
@@ -450,6 +452,8 @@ def _fit_curve(model, params, t_fine, C0):
         return _zero_order(t_fine, params[0], C0)
     elif model == "Pseudo-first":
         return _first_order(t_fine, params[0], C0)
+    elif model == "Pseudo-first (initial drop)":
+        return _first_order_drop(t_fine, params[0], params[1], C0)
     elif model == "Pseudo-second-order":
         return _second_order(t_fine, params[0], C0)
     elif model == "Elovich":
@@ -861,6 +865,7 @@ def _tab_kinetics(cfg, uploaded):
             title_lin = f"{cat_label} — Pseudo-second-order  |  1/C vs t"
         elif best in (
             "Pseudo-first",
+            "Pseudo-first (initial drop)",
             "Zero-order",
             "Power-Law",
             "Avrami",
@@ -1028,6 +1033,11 @@ def _tab_kinetics(cfg, uploaded):
                             "AICc": mr.get("aicc", "N/A"),
                             "AIC": mr.get("aic", "N/A"),
                             "t½ (min)": _fmt_thalf(mr.get("t_half", float("nan"))),
+                            "Initial drop (%)": (
+                                f"{mr['initial_drop_pct']:.1f}"
+                                if mr.get("initial_drop_pct") is not None
+                                else "–"
+                            ),
                             "Note": note,
                         }
                     )
@@ -1041,6 +1051,7 @@ def _tab_kinetics(cfg, uploaded):
                             "AICc": "–",
                             "AIC": "–",
                             "t½ (min)": "–",
+                            "Initial drop (%)": "–",
                             "Note": note,
                         }
                     )

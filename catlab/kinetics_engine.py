@@ -31,6 +31,7 @@ MIN_FIT_POINTS = 6
 N_PARAMS = {
     "Zero-order": 1,
     "Pseudo-first": 1,
+    "Pseudo-first (initial drop)": 2,
     "Pseudo-second-order": 1,
     "Elovich": 2,
     "L-H": 2,
@@ -83,6 +84,7 @@ BOUNDED_SHAPE_PARAMS = {
     "Power-Law": [(1, "n", 0.1, 5.0)],
     "Avrami": [(1, "n", 0.1, 4.0)],
     "Double-Exponential": [(2, "A", 0.0, 1.0)],
+    "Pseudo-first (initial drop)": [(1, "A", 0.0, 1.0)],
 }
 BOUND_NEAR = 1e-3  # window: within 1e-3 * max(|bound|, 1) of the bound
 BOUND_STEP = 1e-6  # inward probe step, as a fraction of max(|bound|, 1)
@@ -129,6 +131,7 @@ def _params_at_bound(f, t, Ct, popt, specs):
 MODEL_NAMES = [
     "Zero-order",
     "Pseudo-first",
+    "Pseudo-first (initial drop)",
     "Pseudo-second-order",
     "Elovich",
     "L-H",
@@ -197,6 +200,19 @@ def _zero_order(t, k, C0):
 
 def _first_order(t, k, C0):
     return C0 * np.exp(-k * t)
+
+
+def _first_order_drop(t, k, A, C0):
+    """Pseudo-first-order with a fast initial step: C(t) = A·C0·exp(−k·t).
+
+    (1 − A) is the fraction removed almost instantly at the start (rapid
+    adsorption or a fast initial reaction).  A = 1 is plain PFO.  At t = 0 the
+    function returns A·C0 (the value just AFTER the drop); the (t=0, C0) anchor
+    is excluded from fitting and its re-expanded "pred" stays C0, the value just
+    BEFORE the drop (see _anchor_mask).
+    """
+    t = np.asarray(t, dtype=float)
+    return A * C0 * np.exp(-k * t)
 
 
 def _second_order(t, k, C0):
@@ -422,6 +438,12 @@ def _anchor_mask(time, Ct, C0):
     points are therefore left out of fitting and of every statistic.
     A t = 0 point whose concentration differs from C0 (e.g. after a dark
     adsorption step) is informative and is kept.
+
+    The exception is "Pseudo-first (initial drop)", which returns A·C0 (not C0)
+    at t = 0 because of its fast initial step.  Its anchor is still excluded
+    from fitting — otherwise it would force A = 1 and negate the model's
+    purpose — and its re-expanded "pred" at the anchor stays C0, the value just
+    before the drop.
     """
     t = np.asarray(time, dtype=float)
     Ct = np.asarray(Ct, dtype=float)
@@ -455,6 +477,31 @@ def _post_first(p, se, at_bound, C0):
         "col_k": "Kapp (1/min)",
         "r0": r0,
         "r0_se": se[0] * C0,
+    }
+
+
+def _post_first_drop(p, se, at_bound, C0):
+    k, A = p
+    initial_drop_pct = 100.0 * (1.0 - A)
+    r0 = k * A * C0
+    if A > 0.5 and k > 0:
+        t_half = round(np.log(2.0 * A) / k, 4)
+    elif A <= 0.5:
+        t_half = 0.0  # half already removed by the drop
+    else:
+        t_half = float("nan")  # k == 0
+    return {
+        "label": f"k = {_fmt_sci(k)} min⁻¹, initial drop = {initial_drop_pct:.1f}%",
+        "t_half": t_half,
+        "k": k,
+        "k_se": se[0],
+        "A": A,
+        "A_se": se[1],
+        "initial_drop_pct": initial_drop_pct,
+        "col_k": "k_drop (1/min)",
+        "r0": r0,
+        "r0_se": None,
+        "at_bound": at_bound,
     }
 
 
@@ -565,6 +612,16 @@ def _de_prepare(p, se):
 _MODEL_SPECS = [
     ("Zero-order", _zero_order, [1e-6], ([0], [np.inf]), 5000, False, None, _post_zero),
     ("Pseudo-first", _first_order, [0.01], ([0], [np.inf]), 5000, False, None, _post_first),
+    (
+        "Pseudo-first (initial drop)",
+        _first_order_drop,
+        [0.01, 0.9],
+        ([0, 0], [np.inf, 1.0]),
+        10000,
+        True,
+        None,
+        _post_first_drop,
+    ),
     ("Pseudo-second-order", _second_order, [1.0], ([0], [np.inf]), 5000, False, None, _post_second),
     (
         "Elovich",
