@@ -27,7 +27,7 @@ app = [
 dev = [
     "pytest>=7",
     "pytest-cov",
-    "flake8",
+    "ruff",
 ]
 
 [tool.setuptools]
@@ -41,3 +41,16 @@ markers = [
     "slow: long-running tests (validation harness determinism), run with `-m slow`",
 ]
 addopts = "-m \"not slow\""
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "venv", "tests/data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]          # long lines are left to the formatter
+
+[tool.ruff.lint.per-file-ignores]
+"app_ods.py" = ["E402"]    # matplotlib.use("Agg") must run before pyplot import
+"catlab/__init__.py" = ["F401"]   # public re-exports
