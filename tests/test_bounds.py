@@ -1,18 +1,18 @@
 # tests/test_bounds.py
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from catlab.kinetics_engine import (_fit_nonlinear, _best_model, MODEL_NAMES,
-                                    _zero_order)
+from catlab.kinetics_engine import _fit_nonlinear, _best_model, MODEL_NAMES, _zero_order
 
 C0 = 7.798e-3
 T = np.array([0, 15, 30, 45, 60, 90, 120.0])
 
 
 def _avrami_data(n):
-    return C0 * np.exp(-(0.02 * T) ** n)
+    return C0 * np.exp(-((0.02 * T) ** n))
 
 
 def test_power_law_flags_n_at_lower_bound_on_zero_order_data():

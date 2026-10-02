@@ -1,7 +1,8 @@
 # tests/test_ods_kinetics.py
 # Tests for catlab/ods_kinetics.py — previously 0% coverage.
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,7 @@ C0 = 0.01559  # mol/L  (~500 ppmS)
 # ==============================================================
 # _fit_kinetics — core fitting logic
 # ==============================================================
+
 
 class TestFitKinetics:
     """Tests for _fit_kinetics — delegates to shared nonlinear engine."""
@@ -54,11 +56,19 @@ class TestFitKinetics:
         Ct = _first_order(self.T, 0.02, C0)
         result = _fit_kinetics(self.T, Ct, C0)
         expected = [
-            "K0 (mol/L/min)", "R2_zero",
-            "Kapp (1/min)",   "R2_first",
-            "K2 (L/mol/min)", "R2_second",
+            "K0 (mol/L/min)",
+            "R2_zero",
+            "Kapp (1/min)",
+            "R2_first",
+            "K2 (L/mol/min)",
+            "R2_second",
             "t_half (min)",
-            "_t", "_y0", "_y1", "_y2", "_C0", "_C",
+            "_t",
+            "_y0",
+            "_y1",
+            "_y2",
+            "_C0",
+            "_C",
         ]
         for key in expected:
             assert key in result, f"missing key: {key}"
@@ -131,8 +141,7 @@ class TestFitKinetics:
         k_true = 0.02
         rng = np.random.default_rng(42)
         Ct_clean = _first_order(self.T, k_true, C0)
-        Ct = np.clip(Ct_clean * (1 + rng.normal(0, 0.03, len(self.T))),
-                     0.001, C0 * 0.999)
+        Ct = np.clip(Ct_clean * (1 + rng.normal(0, 0.03, len(self.T))), 0.001, C0 * 0.999)
         result = _fit_kinetics(self.T, Ct, C0)
         assert result["R2_first"] > 0.90
         assert abs(result["Kapp (1/min)"] - k_true) / k_true < 0.20
@@ -142,12 +151,13 @@ class TestFitKinetics:
     def test_converged_false_zeroes_ks(self, monkeypatch):
         """AUD-5 regression: explicit converged=False → k=0, R2=0 for all
         three models, matching the engine's failure contract."""
-        fake = {"Zero-order": {"converged": False},
-                "Pseudo-first": {"converged": False},
-                "Pseudo-second-order": {"converged": False}}
-        monkeypatch.setattr("catlab.ods_kinetics._fit_nonlinear",
-                            lambda *a, **kw: fake)
-        result = _fit_kinetics(np.array([0.0, 1.0]), np.array([C0, C0*0.5]), C0)
+        fake = {
+            "Zero-order": {"converged": False},
+            "Pseudo-first": {"converged": False},
+            "Pseudo-second-order": {"converged": False},
+        }
+        monkeypatch.setattr("catlab.ods_kinetics._fit_nonlinear", lambda *a, **kw: fake)
+        result = _fit_kinetics(np.array([0.0, 1.0]), np.array([C0, C0 * 0.5]), C0)
         assert result["K0 (mol/L/min)"] == 0.0
         assert result["Kapp (1/min)"] == 0.0
         assert result["K2 (L/mol/min)"] == 0.0
@@ -159,6 +169,7 @@ class TestFitKinetics:
 # ==============================================================
 # generate_template — Excel template creation
 # ==============================================================
+
 
 class TestGenerateTemplate:
     """Tests for generate_template — creates .xlsx template files."""
@@ -197,6 +208,7 @@ class TestGenerateTemplate:
 # run_ods_analysis — full lifecycle (Excel → fit → plot → export)
 # ==============================================================
 
+
 class TestRunODSAnalysis:
     """Integration tests for run_ods_analysis."""
 
@@ -210,6 +222,7 @@ class TestRunODSAnalysis:
     def test_basic_single_catalyst_ppmS(self, tmp_path, monkeypatch):
         """End-to-end: single-catalyst Excel with PFO-like data."""
         import matplotlib.pyplot as plt
+
         monkeypatch.setattr(plt, "savefig", lambda *a, **kw: None)
 
         t_min = [0, 10, 20, 40, 60, 90, 120, 180, 240, 300]
@@ -217,7 +230,9 @@ class TestRunODSAnalysis:
         excel_path = str(tmp_path / "data.xlsx")
         self._make_excel(excel_path, [("Cat-A", t_min, rem)])
         df = run_ods_analysis(
-            excel_path, c0_value=500.0, c0_unit="ppmS",
+            excel_path,
+            c0_value=500.0,
+            c0_unit="ppmS",
             output_dir=str(tmp_path),
         )
         assert isinstance(df, pd.DataFrame)
@@ -230,16 +245,22 @@ class TestRunODSAnalysis:
     def test_multi_catalyst(self, tmp_path, monkeypatch):
         """Two catalysts in one Excel — both fitted."""
         import matplotlib.pyplot as plt
+
         monkeypatch.setattr(plt, "savefig", lambda *a, **kw: None)
 
         t_min = [0, 30, 60, 120, 180]
         excel_path = str(tmp_path / "multi.xlsx")
-        self._make_excel(excel_path, [
-            ("Cat-A", t_min, [0.0, 45.0, 70.0, 90.0, 96.0]),
-            ("Cat-B", t_min, [0.0, 20.0, 35.0, 55.0, 68.0]),
-        ])
+        self._make_excel(
+            excel_path,
+            [
+                ("Cat-A", t_min, [0.0, 45.0, 70.0, 90.0, 96.0]),
+                ("Cat-B", t_min, [0.0, 20.0, 35.0, 55.0, 68.0]),
+            ],
+        )
         df = run_ods_analysis(
-            excel_path, c0_value=500.0, c0_unit="ppmS",
+            excel_path,
+            c0_value=500.0,
+            c0_unit="ppmS",
             output_dir=str(tmp_path),
         )
         assert len(df) == 2
@@ -249,6 +270,7 @@ class TestRunODSAnalysis:
     def test_t0_not_zero_gets_prepended(self, tmp_path, monkeypatch):
         """Data starting at t>0: run_ods_analysis inserts (0, 0)."""
         import matplotlib.pyplot as plt
+
         monkeypatch.setattr(plt, "savefig", lambda *a, **kw: None)
 
         t_min = [10, 30, 60, 120, 180]
@@ -256,7 +278,9 @@ class TestRunODSAnalysis:
         excel_path = str(tmp_path / "shifted.xlsx")
         self._make_excel(excel_path, [("Cat-A", t_min, rem)])
         df = run_ods_analysis(
-            excel_path, c0_value=500.0, c0_unit="ppmS",
+            excel_path,
+            c0_value=500.0,
+            c0_unit="ppmS",
             output_dir=str(tmp_path),
         )
         assert len(df) == 1
@@ -269,7 +293,9 @@ class TestRunODSAnalysis:
 # stay in place as diagnostics; these tests pin both halves.
 # ─────────────────────────────────────────────────────────────────
 from catlab.kinetics_engine import (
-    _best_model, akaike_weights, MODEL_NAMES,
+    _best_model,
+    akaike_weights,
+    MODEL_NAMES,
 )
 
 
@@ -288,9 +314,21 @@ class TestAiccReporting:
         """The R2-only contract other callers rely on must not break."""
         Ct = _first_order(self.T, 0.02, C0)
         r = _fit_kinetics(self.T, Ct, C0)
-        for key in ("K0 (mol/L/min)", "R2_zero", "Kapp (1/min)", "R2_first",
-                    "K2 (L/mol/min)", "R2_second", "t_half (min)",
-                    "_t", "_y0", "_y1", "_y2", "_C0", "_C"):
+        for key in (
+            "K0 (mol/L/min)",
+            "R2_zero",
+            "Kapp (1/min)",
+            "R2_first",
+            "K2 (L/mol/min)",
+            "R2_second",
+            "t_half (min)",
+            "_t",
+            "_y0",
+            "_y1",
+            "_y2",
+            "_C0",
+            "_C",
+        ):
             assert key in r, f"legacy key {key!r} disappeared"
 
     def test_per_model_aicc_and_weights_exposed(self):

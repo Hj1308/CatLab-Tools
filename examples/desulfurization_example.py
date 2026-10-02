@@ -6,19 +6,20 @@ from catlab import SampleInfo, KineticsAnalyser, convert_to_mmol_L, calc_toc_rem
 
 # ── 1. Define sample ──────────────────────────────────
 info = SampleInfo(
-    sample_name         = "MoS2/Al2O3",
-    process_type        = "desulfurization",
-    catalyst_mass_g     = 0.05,
-    solution_vol_L      = 0.050,
-    c0_value            = 500.0,
-    c0_unit             = "ppmS",          # auto-converts with MW_S = 32.06
-    active_sites_mmol_g = 0.32,            # from NH3-TPD
-    notes               = "DBT in n-decane, 300°C, 30 bar H2"
+    sample_name="MoS2/Al2O3",
+    process_type="desulfurization",
+    catalyst_mass_g=0.05,
+    solution_vol_L=0.050,
+    c0_value=500.0,
+    c0_unit="ppmS",  # auto-converts with MW_S = 32.06
+    active_sites_mmol_g=0.32,  # from NH3-TPD
+    notes="DBT in n-decane, 300°C, 30 bar H2",
 )
 print("=" * 50)
 print("SAMPLE INFO")
 print("=" * 50)
 import pandas as pd
+
 print(pd.DataFrame([info.summary()]).T.to_string())
 
 # ── 2. Concentration–time data ────────────────────────
@@ -28,7 +29,7 @@ c_mmol = np.array([convert_to_mmol_L(v, "ppmS") for v in c_ppmS])
 
 # ── 3. Kinetics analysis ──────────────────────────────
 analyzer = KineticsAnalyser(time_h, c_mmol, info)
-report   = analyzer.full_report()
+report = analyzer.full_report()
 
 print("\n" + "=" * 50)
 print("KINETICS REPORT")

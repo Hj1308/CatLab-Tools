@@ -1,14 +1,15 @@
 # tests/test_fit_convergence.py
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from scipy.optimize import curve_fit
 
 from catlab.kinetics_engine import _fit_nonlinear, _lh_model
 
-C0 = 7.798e-3                                    # mol/L (250 ppmS)
-T = np.array([0, 15, 30, 45, 60, 90, 120.0])     # typical 7-point ODS grid
+C0 = 7.798e-3  # mol/L (250 ppmS)
+T = np.array([0, 15, 30, 45, 60, 90, 120.0])  # typical 7-point ODS grid
 
 
 def _noisy_lh(seed):
@@ -28,9 +29,17 @@ def test_lh_fit_reaches_the_least_squares_optimum():
     sse_engine = np.sum((Ct - r["pred"]) ** 2)
 
     f = lambda t_, a, b: _lh_model(t_, a, b, C0)
-    p_ref, _ = curve_fit(f, T, Ct, p0=[0.01, 10.0],
-                         bounds=([0, 0], [np.inf, np.inf]),
-                         ftol=1e-14, xtol=1e-14, gtol=1e-14, maxfev=20000)
+    p_ref, _ = curve_fit(
+        f,
+        T,
+        Ct,
+        p0=[0.01, 10.0],
+        bounds=([0, 0], [np.inf, np.inf]),
+        ftol=1e-14,
+        xtol=1e-14,
+        gtol=1e-14,
+        maxfev=20000,
+    )
     sse_ref = np.sum((Ct - f(T, *p_ref)) ** 2)
 
     assert sse_engine <= 1.01 * sse_ref

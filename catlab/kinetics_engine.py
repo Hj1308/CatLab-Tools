@@ -29,16 +29,26 @@ MW_S = 32.06  # g/mol
 # make "best model" incomparable between catalysts.
 MIN_FIT_POINTS = 6
 N_PARAMS = {
-    "Zero-order":          1,
-    "Pseudo-first":        1,
+    "Zero-order": 1,
+    "Pseudo-first": 1,
     "Pseudo-second-order": 1,
-    "Elovich":             2,
-    "L-H":                 2,
-    "Power-Law":           2,
-    "Avrami":              2,
-    "Double-Exponential":  3,   # k1, k2, A  (C0 is locked)
+    "Elovich": 2,
+    "L-H": 2,
+    "Power-Law": 2,
+    "Avrami": 2,
+    "Double-Exponential": 3,  # k1, k2, A  (C0 is locked)
 }
-COLORS = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#17becf", "#bcbd22"]
+COLORS = [
+    "#e41a1c",
+    "#377eb8",
+    "#4daf4a",
+    "#984ea3",
+    "#ff7f00",
+    "#a65628",
+    "#f781bf",
+    "#17becf",
+    "#bcbd22",
+]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "h"]
 
 # Kept as an extension point: models in this set are fitted but never eligible
@@ -70,13 +80,13 @@ FIT_TOL = dict(gtol=1e-10)
 # Rate constants (lower bound 0, dimensional) are not checked: a closeness
 # window would depend on their units.
 BOUNDED_SHAPE_PARAMS = {
-    "Power-Law":          [(1, "n", 0.1, 5.0)],
-    "Avrami":             [(1, "n", 0.1, 4.0)],
+    "Power-Law": [(1, "n", 0.1, 5.0)],
+    "Avrami": [(1, "n", 0.1, 4.0)],
     "Double-Exponential": [(2, "A", 0.0, 1.0)],
 }
-BOUND_NEAR = 1e-3   # window: within 1e-3 * max(|bound|, 1) of the bound
-BOUND_STEP = 1e-6   # inward probe step, as a fraction of max(|bound|, 1)
-BOUND_RISE = 1e-8   # minimum relative SSE rise that counts as binding
+BOUND_NEAR = 1e-3  # window: within 1e-3 * max(|bound|, 1) of the bound
+BOUND_STEP = 1e-6  # inward probe step, as a fraction of max(|bound|, 1)
+BOUND_RISE = 1e-8  # minimum relative SSE rise that counts as binding
 # Checked against refits with the bound relaxed, on 2400 noisy synthetic fits
 # (8 archetypes x 100 x 3 models): 442 of 454 binding bounds flagged, 11 false
 # flags (9 of them exactly on the bound).  11 of the 12 misses are
@@ -115,10 +125,16 @@ def _params_at_bound(f, t, Ct, popt, specs):
                 hits.append(f"{name} at {side} bound {b:g}")
     return hits
 
+
 MODEL_NAMES = [
-    "Zero-order", "Pseudo-first", "Pseudo-second-order",
-    "Elovich", "L-H",
-    "Power-Law", "Avrami", "Double-Exponential"
+    "Zero-order",
+    "Pseudo-first",
+    "Pseudo-second-order",
+    "Elovich",
+    "L-H",
+    "Power-Law",
+    "Avrami",
+    "Double-Exponential",
 ]
 
 
@@ -178,15 +194,18 @@ def convert_to_mmol_L(value, unit, mw=None):
 def _zero_order(t, k, C0):
     return np.maximum(C0 - k * t, 0)
 
+
 def _first_order(t, k, C0):
     return C0 * np.exp(-k * t)
+
 
 def _second_order(t, k, C0):
     return C0 / (1 + k * C0 * t)
 
+
 def _elovich(t, alpha, beta, C0):
-    return C0 - (1.0 / np.maximum(beta, 1e-15)) * np.log1p(
-        np.maximum(alpha * beta * t, 0))
+    return C0 - (1.0 / np.maximum(beta, 1e-15)) * np.log1p(np.maximum(alpha * beta * t, 0))
+
 
 def _lambertw_exp(y):
     """W(exp(y)) for an array y, without overflow for large y.
@@ -227,6 +246,7 @@ def _lh_model(t, k_LH, K_ads, C0):
     C = _lambertw_exp(np.log(Kc) + Kc - k_LH * K_ads * t) / K_ads
     return np.maximum(C, 0.0)
 
+
 # -- Additional Non-Linear Kinetic Models (v3.5.0) --------------
 def _power_law(t, k, n, C0):
     """
@@ -240,14 +260,15 @@ def _power_law(t, k, n, C0):
         return C0 * np.exp(-k * t)
     exponent = 1.0 - n
     inside = C0**exponent - k * exponent * t
-    if exponent > 0:   # n < 1: inside decreases toward 0, clip at 0
+    if exponent > 0:  # n < 1: inside decreases toward 0, clip at 0
         inside = np.maximum(inside, 0.0)
         return inside ** (1.0 / exponent)
-    else:              # n > 1: reaction goes to completion when inside <= 0
+    else:  # n > 1: reaction goes to completion when inside <= 0
         C = np.zeros_like(inside)
         mask = inside > 0
         C[mask] = inside[mask] ** (1.0 / exponent)
         return C
+
 
 def _power_law_t_half(C0, k, n):
     """t½ for Power-Law. Returns NaN if not physically meaningful."""
@@ -264,15 +285,18 @@ def _power_law_t_half(C0, k, n):
     except Exception:
         return float("nan")
 
+
 def _avrami(t, k_av, n_av, C0):
     """Avrami (Johnson-Mehl-Avrami): C(t) = C0*exp(-k*t^n)"""
     t = np.asarray(t, dtype=float)
     return C0 * np.exp(-k_av * t**n_av)
 
+
 def _double_exponential(t, k1, k2, A, C0):
     """Double Exponential: fast + slow parallel decay"""
     t = np.asarray(t, dtype=float)
     return C0 * (A * np.exp(-k1 * t) + (1.0 - A) * np.exp(-k2 * t))
+
 
 # -- Statistical helpers -----------------------------------------
 def _r2(y_obs, y_pred):
@@ -280,10 +304,12 @@ def _r2(y_obs, y_pred):
     ss_tot = np.sum((y_obs - np.mean(y_obs)) ** 2)
     return round(1 - ss_res / ss_tot if ss_tot > 0 else 0.0, 4)
 
+
 def _adj_r2(r2, n, p):
     if n <= p + 1:
         return float("nan")
     return round(1 - (1 - r2) * (n - 1) / (n - p - 1), 4)
+
 
 def _aic(y_obs, y_pred, p):
     """AIC for nonlinear least squares.
@@ -332,6 +358,7 @@ def _elovich_t_half(C0, alpha, beta):
     except Exception:
         return float("nan")
 
+
 def _lh_t_half(C0, k_LH, K_ads):
     """
     FIX A: Exact analytical t1/2 for Langmuir-Hinshelwood.
@@ -354,10 +381,11 @@ def _fmt_sci(val):
         return "0"
     if np.isinf(val):
         return "∞"
-    exp  = int(np.floor(np.log10(abs(val))))
-    coef = val / (10 ** exp)
-    sup  = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    exp = int(np.floor(np.log10(abs(val))))
+    coef = val / (10**exp)
+    sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
     return f"{coef:.2f} × 10{str(exp).translate(sup)}"
+
 
 def _fmt_thalf(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
@@ -368,6 +396,7 @@ def _fmt_thalf(val):
         return _fmt_sci(val)
     return f"{val:.2f}"
 
+
 def _fmt_pm(val, se):
     if val is None or se is None:
         return _fmt_sci(val)
@@ -375,10 +404,10 @@ def _fmt_pm(val, se):
         return _fmt_sci(val)
     if np.isinf(se) or se > abs(val) * 100:
         return f"{_fmt_sci(val)} (SE large)"
-    exp   = int(np.floor(np.log10(abs(val)))) if val != 0 else 0
-    scale = 10 ** exp
-    sup   = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
-    return f"({val/scale:.2f} ± {se/scale:.2f}) × 10{str(exp).translate(sup)}"
+    exp = int(np.floor(np.log10(abs(val)))) if val != 0 else 0
+    scale = 10**exp
+    sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    return f"({val / scale:.2f} ± {se / scale:.2f}) × 10{str(exp).translate(sup)}"
 
 
 # -- Non-linear fitting engine -----------------------------------
@@ -394,8 +423,8 @@ def _anchor_mask(time, Ct, C0):
     A t = 0 point whose concentration differs from C0 (e.g. after a dark
     adsorption step) is informative and is kept.
     """
-    t  = np.asarray(time, dtype=float)
-    Ct = np.asarray(Ct,   dtype=float)
+    t = np.asarray(time, dtype=float)
+    Ct = np.asarray(Ct, dtype=float)
     return (t == 0) & np.isclose(Ct, C0, rtol=1e-9, atol=0.0)
 
 
@@ -404,69 +433,123 @@ def _anchor_mask(time, Ct, C0):
 # common {"params", "R2", "pred", "adj_r2", "aic", "aicc"} block.
 def _post_zero(p, se, at_bound, C0):
     k0 = p[0]
-    return {"label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
-            "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
-            "k": k0, "k_se": se[0], "col_k": "K0 (mol/L/min)",
-            "r0": k0, "r0_se": se[0]}
+    return {
+        "label": f"k₀ = {_fmt_sci(k0)} mol·L⁻¹·min⁻¹",
+        "t_half": round(0.5 * C0 / k0, 4) if k0 > 0 else float("nan"),
+        "k": k0,
+        "k_se": se[0],
+        "col_k": "K0 (mol/L/min)",
+        "r0": k0,
+        "r0_se": se[0],
+    }
+
 
 def _post_first(p, se, at_bound, C0):
     kapp = p[0]
     r0 = kapp * C0
-    return {"label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
-            "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
-            "k": kapp, "k_se": se[0], "col_k": "Kapp (1/min)",
-            "r0": r0, "r0_se": se[0] * C0}
+    return {
+        "label": f"kₐₚₚ = {_fmt_sci(kapp)} min⁻¹",
+        "t_half": round(np.log(2) / kapp, 4) if kapp > 0 else float("nan"),
+        "k": kapp,
+        "k_se": se[0],
+        "col_k": "Kapp (1/min)",
+        "r0": r0,
+        "r0_se": se[0] * C0,
+    }
+
 
 def _post_second(p, se, at_bound, C0):
     k2 = p[0]
-    r0 = k2 * C0 ** 2
-    return {"label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
-            "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
-            "k": k2, "k_se": se[0], "col_k": "K2 (L/mol/min)",
-            "r0": r0, "r0_se": se[0] * C0 ** 2}
+    r0 = k2 * C0**2
+    return {
+        "label": f"k₂ = {_fmt_sci(k2)} L·mol⁻¹·min⁻¹",
+        "t_half": round(1.0 / (k2 * C0), 4) if k2 > 0 else float("nan"),
+        "k": k2,
+        "k_se": se[0],
+        "col_k": "K2 (L/mol/min)",
+        "r0": r0,
+        "r0_se": se[0] * C0**2,
+    }
+
 
 def _post_elovich(p, se, at_bound, C0):
     alpha, beta = p
-    return {"label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
-            "t_half": _elovich_t_half(C0, alpha, beta),
-            "k": alpha, "k_se": se[0], "col_k": "Alpha (mol/L/min)",
-            "r0": alpha, "r0_se": se[0]}
+    return {
+        "label": f"α={_fmt_sci(alpha)}, β={_fmt_sci(beta)}",
+        "t_half": _elovich_t_half(C0, alpha, beta),
+        "k": alpha,
+        "k_se": se[0],
+        "col_k": "Alpha (mol/L/min)",
+        "r0": alpha,
+        "r0_se": se[0],
+    }
+
 
 def _post_lh(p, se, at_bound, C0):
     k_LH, K_ads = p
     r0 = k_LH * K_ads * C0 / (1 + K_ads * C0)
     _kc = K_ads * C0
     _regime = "First-order" if _kc < 0.1 else "Zero-order" if _kc > 10 else "Mixed"
-    return {"label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
-            "t_half": _lh_t_half(C0, k_LH, K_ads),
-            "k": k_LH, "k_se": se[0], "col_k": "kLH (mol/L/min)",
-            "r0": r0, "r0_se": None,
-            "K_ads": K_ads, "K_se": se[1], "regime": _regime}
+    return {
+        "label": f"kLH={_fmt_sci(k_LH)}, K={_fmt_sci(K_ads)}",
+        "t_half": _lh_t_half(C0, k_LH, K_ads),
+        "k": k_LH,
+        "k_se": se[0],
+        "col_k": "kLH (mol/L/min)",
+        "r0": r0,
+        "r0_se": None,
+        "K_ads": K_ads,
+        "K_se": se[1],
+        "regime": _regime,
+    }
+
 
 def _post_power_law(p, se, at_bound, C0):
     k_pl, n_pl = p
-    r0 = k_pl * (C0 ** n_pl)
-    return {"label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
-            "t_half": _power_law_t_half(C0, k_pl, n_pl),
-            "k": k_pl, "k_se": se[0], "n_pl": n_pl, "n_pl_se": se[1],
-            "col_k": "k_PL", "r0": r0, "r0_se": None,
-            "at_bound": at_bound}
+    r0 = k_pl * (C0**n_pl)
+    return {
+        "label": f"k={_fmt_sci(k_pl)}, n={n_pl:.3f}",
+        "t_half": _power_law_t_half(C0, k_pl, n_pl),
+        "k": k_pl,
+        "k_se": se[0],
+        "n_pl": n_pl,
+        "n_pl_se": se[1],
+        "col_k": "k_PL",
+        "r0": r0,
+        "r0_se": None,
+        "at_bound": at_bound,
+    }
+
 
 def _post_avrami(p, se, at_bound, C0):
     k_av, n_av = p
-    return {"label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
-            "t_half": float("nan"),
-            "k": k_av, "k_se": se[0],
-            "col_k": "k_Avrami", "r0": None, "r0_se": None,
-            "at_bound": at_bound}
+    return {
+        "label": f"k={_fmt_sci(k_av)}, n={n_av:.3f}",
+        "t_half": float("nan"),
+        "k": k_av,
+        "k_se": se[0],
+        "col_k": "k_Avrami",
+        "r0": None,
+        "r0_se": None,
+        "at_bound": at_bound,
+    }
+
 
 def _post_double_exponential(p, se, at_bound, C0):
     k1, k2, A_frac = p
-    return {"label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
-            "t_half": float("nan"),
-            "k": k1, "k_se": se[0], "k2": k2, "k2_se": se[1],
-            "col_k": "k1 (fast)", "r0": None, "r0_se": None,
-            "at_bound": at_bound}
+    return {
+        "label": f"k1={_fmt_sci(k1)}, k2={_fmt_sci(k2)}, A={A_frac:.3f}",
+        "t_half": float("nan"),
+        "k": k1,
+        "k_se": se[0],
+        "k2": k2,
+        "k2_se": se[1],
+        "col_k": "k1 (fast)",
+        "r0": None,
+        "r0_se": None,
+        "at_bound": at_bound,
+    }
+
 
 def _de_prepare(p, se):
     """Force k1 (fast) >= k2 for Double-Exponential; the model is symmetric."""
@@ -483,21 +566,48 @@ _MODEL_SPECS = [
     ("Zero-order", _zero_order, [1e-6], ([0], [np.inf]), 5000, False, None, _post_zero),
     ("Pseudo-first", _first_order, [0.01], ([0], [np.inf]), 5000, False, None, _post_first),
     ("Pseudo-second-order", _second_order, [1.0], ([0], [np.inf]), 5000, False, None, _post_second),
-    ("Elovich", _elovich, [1e-4, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_elovich),
+    (
+        "Elovich",
+        _elovich,
+        [1e-4, 10.0],
+        ([0, 0], [np.inf, np.inf]),
+        10000,
+        False,
+        None,
+        _post_elovich,
+    ),
     ("L-H", _lh_model, [0.01, 10.0], ([0, 0], [np.inf, np.inf]), 10000, False, None, _post_lh),
-    ("Power-Law", _power_law, [0.01, 1.5], ([0, 0.1], [np.inf, 5.0]), 10000, True, None, _post_power_law),
+    (
+        "Power-Law",
+        _power_law,
+        [0.01, 1.5],
+        ([0, 0.1], [np.inf, 5.0]),
+        10000,
+        True,
+        None,
+        _post_power_law,
+    ),
     ("Avrami", _avrami, [0.01, 1.0], ([0, 0.1], [np.inf, 4.0]), 8000, True, None, _post_avrami),
-    ("Double-Exponential", _double_exponential, [0.1, 0.01, 0.6], ([0, 0, 0], [np.inf, np.inf, 1.0]), 10000, True, _de_prepare, _post_double_exponential),
+    (
+        "Double-Exponential",
+        _double_exponential,
+        [0.1, 0.01, 0.6],
+        ([0, 0, 0], [np.inf, np.inf, 1.0]),
+        10000,
+        True,
+        _de_prepare,
+        _post_double_exponential,
+    ),
 ]
 
 
 def _fit_nonlinear(time, Ct, C0):
-    t_all  = np.asarray(time, dtype=float)
-    Ct_all = np.asarray(Ct,   dtype=float)
+    t_all = np.asarray(time, dtype=float)
+    Ct_all = np.asarray(Ct, dtype=float)
     anchor = _anchor_mask(t_all, Ct_all, C0)
-    t  = t_all[~anchor]
+    t = t_all[~anchor]
     Ct = Ct_all[~anchor]
-    n  = len(t)
+    n = len(t)
     results = {}
 
     for name, func, p0, bounds, maxfev, bounded, prepare, post in _MODEL_SPECS:
@@ -517,15 +627,24 @@ def _fit_nonlinear(time, Ct, C0):
             r2v = _r2(Ct, pred)
             np_ = N_PARAMS[name]
             results[name] = {
-                "params": tuple(p) + (C0,), "R2": r2v, "pred": pred,
-                "adj_r2": _adj_r2(r2v, n, np_), "aic": _aic(Ct, pred, np_),
+                "params": tuple(p) + (C0,),
+                "R2": r2v,
+                "pred": pred,
+                "adj_r2": _adj_r2(r2v, n, np_),
+                "aic": _aic(Ct, pred, np_),
                 "aicc": _aicc(Ct, pred, np_),
                 **post(p, se, at_bound, C0),
             }
         except (RuntimeError, ValueError) as e:
             results[name] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e)}
         except Exception as e:
-            results[name] = {"R2": np.nan, "aicc": np.nan, "converged": False, "error": str(e), "unexpected_error": True}
+            results[name] = {
+                "R2": np.nan,
+                "aicc": np.nan,
+                "converged": False,
+                "error": str(e),
+                "unexpected_error": True,
+            }
 
     # Statistics above use the n informative points only.  "pred" is returned
     # aligned with the caller's full time vector; anchor points are exactly C0
@@ -541,8 +660,8 @@ def _fit_nonlinear(time, Ct, C0):
 
 
 def _get_valid_models(res, model_names):
-    return {m: res[m] for m in model_names
-            if m in res and res[m].get("converged", True)}
+    return {m: res[m] for m in model_names if m in res and res[m].get("converged", True)}
+
 
 def _best_model(res, model_names):
     """
@@ -558,9 +677,11 @@ def _best_model(res, model_names):
        No model-identity-based preference of any kind.
     """
     valid = _get_valid_models(res, model_names)
-    candidates = {m: r for m, r in valid.items()
-                  if m not in BEST_MODEL_EXCLUDE
-                  and np.isfinite(r.get("aicc", float("inf")))}
+    candidates = {
+        m: r
+        for m, r in valid.items()
+        if m not in BEST_MODEL_EXCLUDE and np.isfinite(r.get("aicc", float("inf")))
+    }
     if not candidates:
         return None
 
@@ -569,12 +690,10 @@ def _best_model(res, model_names):
 
     # Step 2: competitive window
     DELTA = 2.5
-    competitive = {m: r for m, r in candidates.items()
-                   if r["aicc"] - best_aicc_val <= DELTA}
+    competitive = {m: r for m, r in candidates.items() if r["aicc"] - best_aicc_val <= DELTA}
 
     # Step 3: parsimony — fewest parameters, then lowest AICc
-    return min(competitive,
-               key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
+    return min(competitive, key=lambda m: (N_PARAMS.get(m, 99), candidates[m]["aicc"]))
 
 
 def akaike_weights(results, model_names=None, exclude=None):
@@ -592,19 +711,21 @@ def akaike_weights(results, model_names=None, exclude=None):
         model_names = MODEL_NAMES
     if exclude is None:
         exclude = BEST_MODEL_EXCLUDE
-    finites = {m: results[m]["aicc"] for m in model_names
-               if m in results
-               and m not in exclude
-               and np.isfinite(results[m].get("aicc", float("inf")))}
+    finites = {
+        m: results[m]["aicc"]
+        for m in model_names
+        if m in results and m not in exclude and np.isfinite(results[m].get("aicc", float("inf")))
+    }
     if not finites:
         return {}
     aicc_min = min(finites.values())
     deltas = {m: v - aicc_min for m, v in finites.items()}
     exp_terms = {m: np.exp(-d / 2.0) for m, d in deltas.items()}
     total = sum(exp_terms.values())
-    return {m: {"delta_aicc": round(deltas[m], 4),
-                "weight": round(exp_terms[m] / total, 6)}
-            for m in finites}
+    return {
+        m: {"delta_aicc": round(deltas[m], 4), "weight": round(exp_terms[m] / total, 6)}
+        for m in finites
+    }
 
 
 def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
@@ -637,10 +758,10 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
     Returns (excluded_time_points, t_keep, rem_keep, truncation_clamped).
     truncation_clamped is True when the cutoff could not be fully applied.
     """
-    t_keep   = np.asarray(t_raw, dtype=float).copy()
+    t_keep = np.asarray(t_raw, dtype=float).copy()
     rem_keep = np.asarray(rem_raw, dtype=float).copy()
     excluded = []
-    clamped  = False
+    clamped = False
     # A t = 0, 0 % removal point is an anchor (see _anchor_mask): it is not
     # fitted, so it must not count towards MIN_FIT_POINTS.
     n_anchor = int(np.sum((t_keep == 0) & (rem_keep == 0)))
@@ -649,7 +770,7 @@ def _auto_saturation_exclusions(t_raw, rem_raw, max_fractional_uptake=1.0):
         cutoff = max_fractional_uptake * eq_rem
         while len(rem_keep) - n_anchor > MIN_FIT_POINTS and rem_keep[-1] > cutoff:
             excluded.append(float(t_keep[-1]))
-            t_keep   = t_keep[:-1]
+            t_keep = t_keep[:-1]
             rem_keep = rem_keep[:-1]
         clamped = len(rem_keep) - n_anchor <= MIN_FIT_POINTS and rem_keep[-1] > cutoff
     return excluded, t_keep, rem_keep, clamped

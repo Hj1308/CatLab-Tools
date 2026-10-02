@@ -10,11 +10,11 @@ R_GAS = 8.314  # J/(mol·K)
 
 def _C0_both(c0_val, c0_unit, mw_poll, rho_g_per_mL, n_sulfur=1, ppms_volumetric=True):
     if c0_unit == "ppmS":
-        C0_S        = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL, ppms_volumetric)
+        C0_S = _to_mol_L(c0_val, "ppmS", MW_S, rho_g_per_mL, ppms_volumetric)
         C0_compound = C0_S / n_sulfur
     else:
         C0_compound = _to_mol_L(c0_val, c0_unit, mw_poll, rho_g_per_mL, ppms_volumetric)
-        C0_S        = C0_compound * n_sulfur
+        C0_S = C0_compound * n_sulfur
     return C0_compound, C0_S
 
 
@@ -62,7 +62,7 @@ def _arrhenius_ci(cov, n_T):
 def c_to_user(Ct_mol, unit, mw):
     """Convert a concentration from mol/L to the user's display unit."""
     if unit == "ppmS":
-        return Ct_mol * MW_S * 1000        # mol/L → mg(S)/L = ppmS volumetric
+        return Ct_mol * MW_S * 1000  # mol/L → mg(S)/L = ppmS volumetric
     elif unit in ("ppm", "mg/L"):
         return Ct_mol * mw * 1000
     elif unit == "mmol/L":

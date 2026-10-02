@@ -1,13 +1,21 @@
 # tests/test_golden_master.py
 # Golden-master regression for _fit_nonlinear: bit-for-bit output stability.
 import os, sys, json
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
 from catlab.kinetics_engine import (
-    _fit_nonlinear, _first_order, _second_order, _lh_model,
-    _elovich, _avrami, _double_exponential, MODEL_NAMES, _best_model,
+    _fit_nonlinear,
+    _first_order,
+    _second_order,
+    _lh_model,
+    _elovich,
+    _avrami,
+    _double_exponential,
+    MODEL_NAMES,
+    _best_model,
 )
 
 C0 = 7.798e-3
@@ -18,12 +26,12 @@ T_ANCHOR = np.array([0, 15, 30, 45, 60, 90, 120, 180.0])
 # golden_fit.json.  PFO-anchor includes a (t=0, C0) anchor point on an 8-point
 # grid; its golden values were produced by the pre-refactor engine.
 _GEN = [
-    ("PFO",        0, T,        lambda t: _first_order(t, 0.02, C0)),
-    ("PSO",        1, T,        lambda t: _second_order(t, 4.0, C0)),
-    ("L-H",        2, T,        lambda t: _lh_model(t, 0.0001, 300.0, C0)),
-    ("Elovich",    3, T,        lambda t: _elovich(t, 1e-4, 500.0, C0)),
-    ("Avrami",     4, T,        lambda t: _avrami(t, 0.003, 2.0, C0)),
-    ("Double-Exp", 5, T,        lambda t: _double_exponential(t, 0.005, 0.08, 0.3, C0)),
+    ("PFO", 0, T, lambda t: _first_order(t, 0.02, C0)),
+    ("PSO", 1, T, lambda t: _second_order(t, 4.0, C0)),
+    ("L-H", 2, T, lambda t: _lh_model(t, 0.0001, 300.0, C0)),
+    ("Elovich", 3, T, lambda t: _elovich(t, 1e-4, 500.0, C0)),
+    ("Avrami", 4, T, lambda t: _avrami(t, 0.003, 2.0, C0)),
+    ("Double-Exp", 5, T, lambda t: _double_exponential(t, 0.005, 0.08, 0.3, C0)),
     ("PFO-anchor", 6, T_ANCHOR, lambda t: _first_order(t, 0.02, C0)),
 ]
 
@@ -54,8 +62,23 @@ def _compute_results():
 # GOLDEN_STRICT=1: every float is then compared at rtol=1e-12.
 STRICT = os.environ.get("GOLDEN_STRICT") == "1"
 STAT_KEYS = {"R2", "adj_r2", "aic", "aicc", "n_fit", "n_anchor"}
-FRAGILE_KEYS = {"params", "k", "k_se", "k2", "k2_se", "K_ads", "K_se", "K_er",
-                "K_er_se", "n_pl", "n_pl_se", "t_half", "r0", "r0_se", "label"}
+FRAGILE_KEYS = {
+    "params",
+    "k",
+    "k_se",
+    "k2",
+    "k2_se",
+    "K_ads",
+    "K_se",
+    "K_er",
+    "K_er_se",
+    "n_pl",
+    "n_pl_se",
+    "t_half",
+    "r0",
+    "r0_se",
+    "label",
+}
 
 
 def _tol(key):
@@ -71,8 +94,9 @@ def _compare(golden, fresh, key=""):
         return
     if isinstance(golden, dict):
         assert isinstance(fresh, dict)
-        assert set(golden.keys()) == set(fresh.keys()), \
+        assert set(golden.keys()) == set(fresh.keys()), (
             f"key mismatch: {sorted(set(golden) ^ set(fresh))}"
+        )
         for k in golden:
             _compare(golden[k], fresh[k], k)
     elif isinstance(golden, (list, tuple)):
@@ -87,8 +111,7 @@ def _compare(golden, fresh, key=""):
     elif golden is None:
         assert fresh is None
     elif isinstance(golden, (int, float)):
-        np.testing.assert_allclose(fresh, golden, equal_nan=True,
-                                   err_msg=key, **_tol(key))
+        np.testing.assert_allclose(fresh, golden, equal_nan=True, err_msg=key, **_tol(key))
     else:
         raise AssertionError(f"unhandled type {type(golden)}")
 
@@ -107,5 +130,6 @@ def test_golden_master():
         for m in MODEL_NAMES:
             _compare(golden["datasets"][name][m], fresh[name][m])
         # The model the app would select must not change.
-        assert _best_model(golden["datasets"][name], MODEL_NAMES) == \
-            _best_model(fresh[name], MODEL_NAMES), name
+        assert _best_model(golden["datasets"][name], MODEL_NAMES) == _best_model(
+            fresh[name], MODEL_NAMES
+        ), name

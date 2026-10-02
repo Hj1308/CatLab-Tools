@@ -1,12 +1,13 @@
 # tests/test_lh_closed_form.py
 # Tests for the exact closed-form Langmuir-Hinshelwood solution.
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from catlab.kinetics_engine import (_fit_nonlinear, _lh_model, _lh_t_half)
+from catlab.kinetics_engine import _fit_nonlinear, _lh_model, _lh_t_half
 
 
 def _lh_reference(t, k, K, C0):
@@ -24,8 +25,13 @@ def _lh_reference(t, k, K, C0):
 
     sol = solve_ivp(
         lambda tt, x: dx(x, tt),
-        [t[0], t[-1]], [np.log(C0)],
-        t_eval=t, method="Radau", rtol=1e-12, atol=1e-16)
+        [t[0], t[-1]],
+        [np.log(C0)],
+        t_eval=t,
+        method="Radau",
+        rtol=1e-12,
+        atol=1e-16,
+    )
     return np.maximum(np.exp(sol.y[0]), 0.0)
 
 
@@ -76,8 +82,9 @@ def test_t_half_consistent_with_model():
         for K in (0.1, 1.0, 10.0):
             t_half = _lh_t_half(C0, k, K)
             C = _lh_model(np.array([t_half]), k, K, C0)[0]
-            assert abs(C - C0 / 2.0) / (C0 / 2.0) < 1e-9, \
-                f"k={k}, K={K}: C(t_half)={C}, expected {C0/2}"
+            assert abs(C - C0 / 2.0) / (C0 / 2.0) < 1e-9, (
+                f"k={k}, K={K}: C(t_half)={C}, expected {C0 / 2}"
+            )
 
 
 def test_double_exponential_k1_always_fast():
@@ -96,8 +103,9 @@ def test_de_prepare_swaps_slow_first_pair():
     """The fit above converges with k1 > k2 already, so it never reaches the
     swap; exercise _de_prepare directly."""
     from catlab.kinetics_engine import _de_prepare
+
     p, se = _de_prepare(np.array([0.005, 0.08, 0.3]), np.array([1.0, 2.0, 3.0]))
     np.testing.assert_allclose(p, [0.08, 0.005, 0.7])
     np.testing.assert_allclose(se, [2.0, 1.0, 3.0])
     p, se = _de_prepare(np.array([0.08, 0.005, 0.7]), np.array([2.0, 1.0, 3.0]))
-    np.testing.assert_allclose(p, [0.08, 0.005, 0.7])   # already ordered: unchanged
+    np.testing.assert_allclose(p, [0.08, 0.005, 0.7])  # already ordered: unchanged
