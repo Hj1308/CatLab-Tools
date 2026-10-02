@@ -191,6 +191,15 @@ class TestTabLinearization:
                 return
         pytest.fail("linearization R² pivot table not found")
 
+    def test_initial_drop_dataset_warns_pfo_intercept(self, app):
+        rem = SYNTHETIC_REMOVAL["B_initial_drop"]
+        rows = ["Time (min),CatA Removal (%)"]
+        rows += [f"{t},{r}" for t, r in zip(T_SPARSE, rem)]
+        data = ("\n".join(rows) + "\n").encode("utf-8")
+        _upload_csv(app, data)
+        warnings = [w.value for w in app.tabs[1].warning]
+        assert any("does not pass through the origin" in w for w in warnings)
+
 
 class TestTabRemoval:
     def test_removal_renders_efficiency_plots(self, app, csv_bytes):

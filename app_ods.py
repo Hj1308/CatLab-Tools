@@ -55,7 +55,14 @@ from catlab.kinetics_engine import (
     _anchor_mask,
 )
 from catlab import __version__
-from catlab.metrics import _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user
+from catlab.metrics import (
+    _C0_both,
+    _initial_tof_site,
+    _initial_tof_mass,
+    _arrhenius_ci,
+    c_to_user,
+    linear_intercept_check,
+)
 
 # Re-exported for backward compatibility (tests/test_app_ods.py).
 from catlab.kinetics_engine import _get_valid_models  # noqa: F401
@@ -1152,6 +1159,54 @@ def _tab_linearization(cfg, uploaded):
         fig.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
+
+    # ── Intercept consistency checks ─────────────────────────────
+    # Each linearised form has a theoretical intercept (Zero-order -> C0,
+    # Pseudo-first -> 0, Pseudo-second-order -> 1/C0).  A measured intercept far
+    # from that value signals a model/mechanism mismatch.  The check runs on the
+    # non-anchor points only (t = 0 with C = C0 is fitted exactly by construction).
+    intercept_checks = [
+        ("Zero-order", lambda t_, Ct: (t_, Ct), C0),
+        (
+            "Pseudo-first",
+            lambda t_, Ct: (t_[Ct > 0], np.log(C0 / np.maximum(Ct[Ct > 0], 1e-15))),
+            0.0,
+        ),
+        ("Pseudo-second-order", lambda t_, Ct: (t_[Ct > 0], 1.0 / Ct[Ct > 0]), 1.0 / C0),
+    ]
+    for col in removal_cols:
+        removal = df[col].dropna().values[: len(t)].astype(float)
+        Ct = C0 * (1 - removal / 100.0)
+        cat_label = col.replace(" Removal (%)", "").strip()
+        keep = ~_anchor_mask(t, Ct, C0)
+        t_nl = t[keep]
+        Ct_nl = Ct[keep]
+        if len(t_nl) < 3:
+            continue
+        for mname, transform, expected in intercept_checks:
+            x_vals, y_vals = transform(t_nl, Ct_nl)
+            if len(x_vals) < 3:
+                continue
+            chk = linear_intercept_check(x_vals, y_vals, expected)
+            if not chk["deviates"]:
+                continue
+            a = chk["intercept"]
+            ci = chk["ci_half"]
+            if mname == "Pseudo-first" and a > 0:
+                x_pct = 100.0 * (1.0 - np.exp(-a))
+                st.warning(
+                    f"⚠️ {cat_label}: the ln(C₀/C) line does not pass through the origin "
+                    f"(intercept = {a:.4g} ± {ci:.4g}). This corresponds to ≈ {x_pct:.0f} % "
+                    f"removed almost instantly at the start (X = 100·(1 − e^(−a))) — a fast "
+                    f"initial step such as rapid adsorption or a fast initial reaction. A "
+                    f"pseudo-first-order curve forced through C₀ will underfit; see the "
+                    f"'Pseudo-first (initial drop)' model in Tab 1."
+                )
+            else:
+                st.info(
+                    f"ℹ️ {cat_label}: the {mname} linearisation intercept "
+                    f"({a:.4g} ± {ci:.4g}) deviates from its theoretical value {expected:.4g}."
+                )
 
     if not summary_rows:
         return
