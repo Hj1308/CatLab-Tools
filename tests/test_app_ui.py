@@ -173,7 +173,12 @@ class TestTabLinearization:
 class TestTabRemoval:
     def test_removal_renders_efficiency_plots(self, app, csv_bytes):
         _upload_csv(app, csv_bytes)
-        imgs = [c for c in app.tabs[2].children.values() if getattr(c, "type", None) == "imgs"]
+        # Streamlit renamed the element type ("imgs" -> "image"); accept both.
+        imgs = [
+            c
+            for c in app.tabs[2].children.values()
+            if getattr(c, "type", None) in ("imgs", "image")
+        ]
         assert len(imgs) >= 2  # efficiency vs time + final-efficiency bar chart
         assert not app.exception
 
@@ -229,8 +234,18 @@ class TestTabComparison:
 
 class TestTabArrhenius:
     def test_arrhenius_extracts_ea_from_two_temperatures(self, app, csv_bytes):
+        # The 60 °C run must be faster than the 25 °C run; identical files would
+        # give the same k at both temperatures and Ea = 0, testing nothing.
+        fast = pd.DataFrame(
+            {
+                "Time (min)": TIME,
+                "CatA Removal (%)": [0, 45, 68, 81, 89, 96, 98],
+                "CatB Removal (%)": [0, 41, 66, 82, 91, 97, 99],
+            }
+        )
+        fast_bytes = fast.to_csv(index=False).encode("utf-8")
         app.file_uploader(key="arrhenius_files").set_value(
-            [("t25.csv", csv_bytes, "text/csv"), ("t60.csv", csv_bytes, "text/csv")]
+            [("t25.csv", csv_bytes, "text/csv"), ("t60.csv", fast_bytes, "text/csv")]
         ).run()
         tab = app.tabs[7]
         tab.number_input(key="arr_T_t25.csv").set_value(25.0)
@@ -242,6 +257,8 @@ class TestTabArrhenius:
         result = tab.dataframe[0].value
         assert "Eₐ (kJ/mol)" in result.columns
         assert list(result["n_T"]) == [2, 2]
+        ea = pd.to_numeric(result["Eₐ (kJ/mol)"], errors="coerce")
+        assert (ea > 0).all(), f"faster run at 60 °C must give Ea > 0, got {list(ea)}"
 
 
 class TestTabResiduals:
