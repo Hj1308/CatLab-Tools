@@ -48,7 +48,7 @@ pip install -r requirements-lock.txt
 
 | Tab | Module | Description |
 |-----|--------|-------------|
-| 1 | **Kinetic Fitting** | Fit 8 kinetic models, AICc model selection, k±SE, r₀, t½ |
+| 1 | **Kinetic Fitting** | Fit 9 kinetic models, AICc model selection, k±SE, r₀, t½ |
 | 2 | **Linearization** | Linear transforms (1/C vs t, ln(C₀/C) vs t) with best-model summary |
 | 3 | **Removal Efficiency** | Desulfurization efficiency (%) vs time + bar chart |
 | 4 | **TON / TOF** | Option A: site-based (metal catalysts) · Option B: mass-normalized (carbon-based) |
@@ -69,6 +69,7 @@ All models fitted by nonlinear least squares with C₀ locked.
 |-------|--------------------|----|-------|
 | Zero-order | $C_t = C_0 - k_0 t$ | $C_0 / (2k_0)$ | Simplified |
 | Pseudo-first-order | $C_t = C_0\, e^{-k_{app}t}$ | $\ln 2 / k_{app}$ | Simplified |
+| Pseudo-first (initial drop) | $C_t = A\,C_0\, e^{-k t}$ | $\ln(2A)/k$ | Semi-empirical |
 | Pseudo-second-order | $C_t = C_0 / (1 + k_2 C_0 t)$ | $1 / (k_2 C_0)$ | Simplified |
 | Elovich | $C_t = C_0 - \frac{1}{\beta}\ln(1+\alpha\beta t)$ | $(e^{C_0\beta/2}-1)/(\alpha\beta)$ | Phenomenological |
 | Langmuir-Hinshelwood | $dC/dt = -k_{LH} K C / (1+KC)$ (ODE) | $\ln2/(k_{LH}K) + C_0/(2k_{LH})$ | Mechanistic |
