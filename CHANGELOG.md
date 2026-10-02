@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.8.0 (2026-10-02)
 
 ### Added
 - **Tab 1 warns when there are too few points for model selection.** When a

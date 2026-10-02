@@ -1,14 +1,14 @@
 # CatLab-Tools 🔬
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753373.svg)](https://doi.org/10.5281/zenodo.20753373)
-![Version](https://img.shields.io/badge/version-v3.7.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-v3.8.0-blue?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B?style=flat-square&logo=streamlit)
 ![CI](https://github.com/Hj1308/CatLab-Tools/actions/workflows/ci.yml/badge.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ods-kinetics.streamlit.app)
 
-**ODS Calculation Suite — v3.7.0**
+**ODS Calculation Suite — v3.8.0**
 Author: [Hoda Jafari](https://github.com/Hj1308) | MIT License
 
 ---
@@ -252,7 +252,7 @@ Download the advanced template from Tab 1 to get a pre-filled Excel file.
 
 ```
 CatLab-Tools/
-├── app_ods.py          # Main Streamlit app (v3.7.0)
+├── app_ods.py          # Main Streamlit app (v3.8.0)
 ├── requirements.txt    # numpy, pandas, matplotlib, scipy, openpyxl, streamlit
 ├── CHANGELOG.md        # Full version history
 ├── CITATION.cff        # Citation metadata (DOI: 10.5281/zenodo.20753373)
@@ -292,6 +292,7 @@ CatLab-Tools/
 
 | Version | Key Changes |
 |---------|-------------|
+| **v3.8.0** | New model "Pseudo-first (initial drop)" (fast initial step + first order; 9 models); Tab 1 warns when fewer than 6 points; Tab 2 flags linearisation intercepts that contradict the model; CSV uploads work in every tab; end-to-end UI tests, ruff formatting |
 | **v3.7.0** | t=0 anchor point no longer counted as data (R², AICc, residual stats); exact L-H solution (Lambert W); Double-Exponential k1 always fast; Eley-Rideal removed (8 models); warning for non-minute time columns; fractional-time exclusion fixed; `pyproject.toml` |
 | **v3.6.0** | One model-selection rule (AICc) across package API and app; initial-rate TOF in Tab 4; Tab 2 R² shown as a diagnostic, no ranking; exact reporting of fractional excluded times |
 | **v3.5.5** | AICc counts σ² as a parameter (K = p+1); Arrhenius CI uses the t-distribution; MIN_FIT_POINTS = 6; Akaike weights |
@@ -313,17 +314,17 @@ CatLab-Tools/
 
 If you use CatLab-Tools in your research, please cite the version you used:
 
-> Jafari, H. (2026). *CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite* (v3.7.0). Zenodo.
-> DOI: [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566)
+> Jafari, H. (2026). *CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite* (v3.8.0). Zenodo.
+> DOI: [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) (resolves to the latest release; the v3.8.0-specific DOI is listed on that Zenodo page)
 
 | DOI | Resolves to |
 |-----|-------------|
-| [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566) | v3.7.0 only — cite this for results produced with v3.7.0 |
 | [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) | All versions (always the latest release) |
+| [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566) | v3.7.0 only — cite this for results produced with v3.7.0 |
 
-Results from v3.7.0 differ slightly from earlier versions (the t=0 point is no
-longer counted as data, and L-H uses its exact solution); cite the version-specific
-DOI so the numbers can be reproduced.
+Results from v3.7.0 onward differ slightly from earlier versions (the t=0 point is
+no longer counted as data, and L-H uses its exact solution); cite the
+version-specific DOI so the numbers can be reproduced.
 
 ---
 
