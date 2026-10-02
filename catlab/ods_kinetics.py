@@ -25,7 +25,6 @@ from .kinetics_engine import (
     _best_model,
     akaike_weights,
     MODEL_NAMES,
-    N_PARAMS,
 )
 
 

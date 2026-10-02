@@ -515,7 +515,6 @@ def _tab_kinetics(cfg, uploaded):
         return
     t_raw = df[time_col].dropna().values.astype(float)
     C0 = cfg["C0"]
-    c0_val = cfg["c0_val"]
     c0_unit = cfg["c0_unit"]
     if C0 is None:
         st.error("C₀ conversion failed.")
@@ -563,7 +562,7 @@ def _tab_kinetics(cfg, uploaded):
                 options=t_labels,
                 default=[],
                 key=f"excl_{col}",
-                help=f"Excluded points shown as open markers on the plot.",
+                help="Excluded points shown as open markers on the plot.",
             )
             excl_per_cat[col] = {t_label_map[lbl] for lbl in excl if lbl in t_label_map}
 

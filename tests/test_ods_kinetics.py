@@ -1,6 +1,7 @@
 # tests/test_ods_kinetics.py
 # Tests for catlab/ods_kinetics.py — previously 0% coverage.
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -10,7 +11,14 @@ import pytest
 from scipy.optimize import OptimizeWarning
 
 from catlab.ods_kinetics import _fit_kinetics, generate_template, run_ods_analysis
-from catlab.kinetics_engine import _first_order, _second_order, _zero_order
+from catlab.kinetics_engine import (
+    _best_model,
+    _first_order,
+    _second_order,
+    _zero_order,
+    akaike_weights,
+    MODEL_NAMES,
+)
 
 C0 = 0.01559  # mol/L  (~500 ppmS)
 
@@ -292,13 +300,6 @@ class TestRunODSAnalysis:
 # instead of R2 for three of nine models.  The pre-existing R2 keys
 # stay in place as diagnostics; these tests pin both halves.
 # ─────────────────────────────────────────────────────────────────
-from catlab.kinetics_engine import (
-    _best_model,
-    akaike_weights,
-    MODEL_NAMES,
-)
-
-
 class TestAiccReporting:
     T = np.array([0, 10, 20, 30, 45, 60, 90], float)
 

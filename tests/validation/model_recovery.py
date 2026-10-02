@@ -98,7 +98,12 @@
 #   # (wall-clock timing is reloaded from .checkpoint_meta.json):
 #   python tests\validation\model_recovery.py --report-only
 
-import os, sys
+import argparse
+import json
+import os
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # BLAS/OpenMP threads are pinned to 1 as a precaution against oversubscription
 # when N workers each spawn their own thread pool.  This is hygiene, not the
@@ -119,13 +124,8 @@ for _v in (
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-import json
-import time
-import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-import numpy as np
-from catlab.kinetics_engine import (
+import numpy as np  # noqa: E402  # BLAS/OpenMP threads pinned above, before numpy import
+from catlab.kinetics_engine import (  # noqa: E402  # must follow the threading pin above
     _fit_nonlinear,
     _best_model,
     _auto_saturation_exclusions,

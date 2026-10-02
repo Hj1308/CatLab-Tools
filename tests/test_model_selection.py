@@ -1,6 +1,7 @@
 # tests/test_model_selection.py
 # Tests for AICc parameter count, model-selection rules, and Akaike weights.
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -12,12 +13,10 @@ import pytest
 from catlab.kinetics_engine import (
     _aic,
     _aicc,
-    _adj_r2,
     _best_model,
     _fit_nonlinear,
     akaike_weights,
     N_PARAMS,
-    BEST_MODEL_EXCLUDE,
     MODEL_NAMES,
 )
 
@@ -44,7 +43,6 @@ class TestAICC:
 
     def test_aicc_infinite_when_underdetermined(self):
         """n=5, p=4 -> K=5 -> n-K-1 = -1 <= 0 -> inf."""
-        n = 5
         y_obs = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         y_pred = np.array([0.11, 0.19, 0.31, 0.39, 0.51])
         p = 4
@@ -60,7 +58,6 @@ class TestAICC:
         y_pred = np.array([0.11, 0.19, 0.31, 0.39, 0.51, 0.59])
         p = 2
         n = 6
-        K = p + 1  # 3
         rss = np.sum((y_obs - y_pred) ** 2)
         aic_part = n * np.log(rss / n)
         # old: 2*p = 4; new: 2*K = 6

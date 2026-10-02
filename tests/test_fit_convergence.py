@@ -1,5 +1,6 @@
 # tests/test_fit_convergence.py
-import os, sys
+import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -28,7 +29,9 @@ def test_lh_fit_reaches_the_least_squares_optimum():
     r = _fit_nonlinear(T, Ct, C0)["L-H"]
     sse_engine = np.sum((Ct - r["pred"]) ** 2)
 
-    f = lambda t_, a, b: _lh_model(t_, a, b, C0)
+    def f(t_, a, b):
+        return _lh_model(t_, a, b, C0)
+
     p_ref, _ = curve_fit(
         f,
         T,

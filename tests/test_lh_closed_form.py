@@ -1,6 +1,7 @@
 # tests/test_lh_closed_form.py
 # Tests for the exact closed-form Langmuir-Hinshelwood solution.
-import os, sys
+import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

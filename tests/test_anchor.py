@@ -1,7 +1,8 @@
 # tests/test_anchor.py
 # The (t=0, C0) point is fitted exactly by every model because C0 is locked,
 # so it must not count as data in n, R^2, AICc or the auto-saturation floor.
-import os, sys
+import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

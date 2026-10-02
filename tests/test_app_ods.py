@@ -1,20 +1,22 @@
 # tests/test_app_ods.py
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import numpy as np
+import pandas as pd
 import pytest
+from unittest.mock import MagicMock
+
+from scipy import stats as scipy_stats
+
+from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
 
 st = pytest.importorskip("streamlit")
 st.set_page_config = lambda *args, **kwargs: None
 
-import numpy as np
-import pandas as pd
-from unittest.mock import MagicMock
-from scipy import stats as scipy_stats
-
-import app_ods
-from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
+import app_ods  # noqa: E402  # must be imported after set_page_config is patched
 
 
 class TestRepeatedUploadReads:

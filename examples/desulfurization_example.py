@@ -2,6 +2,7 @@
 # Complete example: HDS catalyst analysis with ppmS concentration
 
 import numpy as np
+import pandas as pd
 from catlab import SampleInfo, KineticsAnalyser, convert_to_mmol_L, calc_toc_removal
 
 # ── 1. Define sample ──────────────────────────────────
@@ -18,8 +19,6 @@ info = SampleInfo(
 print("=" * 50)
 print("SAMPLE INFO")
 print("=" * 50)
-import pandas as pd
-
 print(pd.DataFrame([info.summary()]).T.to_string())
 
 # ── 2. Concentration–time data ────────────────────────

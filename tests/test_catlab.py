@@ -1,9 +1,12 @@
 # tests/test_catlab.py
 import numpy as np
 import pytest
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from scipy.integrate import odeint
 
 from catlab import (
     convert_to_mmol_L,
@@ -12,6 +15,12 @@ from catlab import (
     calc_conversion,
     calc_tof,
     calc_toc_removal,
+)
+from catlab.kinetics_engine import (
+    _best_model,
+    _fit_nonlinear,
+    akaike_weights,
+    MODEL_NAMES,
 )
 
 
@@ -164,16 +173,6 @@ class TestHelpers:
 # returned "L-H" with an Akaike weight of ~0.9997 (Zero-order sat at
 # dAICc = 27.52).  These tests pin the two interfaces together.
 # ─────────────────────────────────────────────────────────────────
-from scipy.integrate import odeint
-
-from catlab.kinetics_engine import (
-    _best_model,
-    _fit_nonlinear,
-    akaike_weights,
-    MODEL_NAMES,
-)
-
-
 def _lh_fixture():
     """Synthetic Langmuir-Hinshelwood curve, 2% multiplicative noise."""
     info = SampleInfo("X", "desulfurization", 0.05, 0.010, 250.0, "ppmS", active_sites_mmol_g=0.3)
