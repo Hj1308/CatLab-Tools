@@ -315,12 +315,13 @@ CatLab-Tools/
 If you use CatLab-Tools in your research, please cite the version you used:
 
 > Jafari, H. (2026). *CatLab-Tools: Oxidative Desulfurization Kinetics & Analysis Suite* (v3.8.0). Zenodo.
-> DOI: [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) (resolves to the latest release; the v3.8.0-specific DOI is listed on that Zenodo page)
+> DOI: [10.5281/zenodo.23112259](https://doi.org/10.5281/zenodo.23112259)
 
 | DOI | Resolves to |
 |-----|-------------|
-| [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) | All versions (always the latest release) |
+| [10.5281/zenodo.23112259](https://doi.org/10.5281/zenodo.23112259) | v3.8.0 only — cite this for results produced with v3.8.0 |
 | [10.5281/zenodo.23091566](https://doi.org/10.5281/zenodo.23091566) | v3.7.0 only — cite this for results produced with v3.7.0 |
+| [10.5281/zenodo.20753373](https://doi.org/10.5281/zenodo.20753373) | All versions (always the latest release) |
 
 Results from v3.7.0 onward differ slightly from earlier versions (the t=0 point is
 no longer counted as data, and L-H uses its exact solution); cite the
