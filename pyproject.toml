@@ -39,6 +39,7 @@ version = { attr = "catlab.__version__" }
 [tool.pytest.ini_options]
 markers = [
     "slow: long-running tests (validation harness determinism), run with `-m slow`",
+    "ui: end-to-end Streamlit AppTest tests (tests/test_app_ui.py)",
 ]
 addopts = "-m \"not slow\""
 
