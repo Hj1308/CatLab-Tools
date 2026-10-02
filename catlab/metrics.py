@@ -67,7 +67,9 @@ def linear_intercept_check(x, y, expected, conf=0.95):
     half-width t(0.975, n-2) * intercept_stderr.  With fewer than three points
     there is no valid intercept uncertainty, so deviates is returned False.
 
-    Returns {"intercept", "ci_half", "expected", "deviates"}.
+    Returns {"intercept", "ci_half", "expected", "deviates", "r2"}; r2 is the
+    R² of the linear fit, so callers can ignore an intercept mismatch on a line
+    that does not fit the data anyway.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -78,6 +80,7 @@ def linear_intercept_check(x, y, expected, conf=0.95):
             "ci_half": float("nan"),
             "expected": float(expected),
             "deviates": False,
+            "r2": float("nan"),
         }
     reg = scipy_stats.linregress(x, y)
     df = n - 2
@@ -94,6 +97,7 @@ def linear_intercept_check(x, y, expected, conf=0.95):
         "ci_half": float(ci_half),
         "expected": float(expected),
         "deviates": bool(deviates),
+        "r2": float(reg.rvalue**2),
     }
 
 

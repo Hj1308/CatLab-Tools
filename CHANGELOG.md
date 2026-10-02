@@ -9,9 +9,10 @@
   two-parameter models and cannot evaluate three-parameter ones. The summary
   table now also reports `n (fitted)` per catalyst.
 - **Tab 2 flags linearisation intercepts that contradict the model.** The
-  Zero-order, Pseudo-first and Pseudo-second-order linearisations are checked
-  against their theoretical intercepts (C₀, 0 and 1/C₀); a PFO line that does
-  not pass through the origin warns about a fast initial removal step.
+  Pseudo-first and Pseudo-second-order linearisations are checked against their
+  theoretical intercepts (0 and 1/C₀, 95 % CI, t = 0 anchor excluded). A PFO
+  line that does not pass through the origin warns about a fast initial removal
+  step; a PSO mismatch is noted only when the straight line fits (R² ≥ 0.95).
 - **New kinetic model: "Pseudo-first (initial drop)".** Fits
   C(t) = A·C₀·e^(−kt) to model a fast initial removal (rapid adsorption or a
   fast initial reaction) followed by first-order decay. A = 1 recovers plain

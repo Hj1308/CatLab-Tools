@@ -66,6 +66,9 @@ STRICT = os.environ.get("GOLDEN_STRICT") == "1"
 STAT_KEYS = {"R2", "adj_r2", "aic", "aicc", "n_fit", "n_anchor"}
 FRAGILE_KEYS = {
     "params",
+    "A",
+    "A_se",
+    "initial_drop_pct",
     "k",
     "k_se",
     "k2",

@@ -1172,12 +1172,13 @@ def _tab_linearization(cfg, uploaded):
         plt.close(fig)
 
     # ── Intercept consistency checks ─────────────────────────────
-    # Each linearised form has a theoretical intercept (Zero-order -> C0,
-    # Pseudo-first -> 0, Pseudo-second-order -> 1/C0).  A measured intercept far
+    # Each linearised form has a theoretical intercept (Pseudo-first -> 0,
+    # Pseudo-second-order -> 1/C0).  A measured intercept far
     # from that value signals a model/mechanism mismatch.  The check runs on the
     # non-anchor points only (t = 0 with C = C0 is fitted exactly by construction).
+    # Zero-order (C vs t -> C0) is not checked: on any decelerating run the
+    # straight line misses C0, which repeats the Pseudo-first warning below.
     intercept_checks = [
-        ("Zero-order", lambda t_, Ct: (t_, Ct), C0),
         (
             "Pseudo-first",
             lambda t_, Ct: (t_[Ct > 0], np.log(C0 / np.maximum(Ct[Ct > 0], 1e-15))),
@@ -1213,7 +1214,10 @@ def _tab_linearization(cfg, uploaded):
                     f"pseudo-first-order curve forced through C₀ will underfit; see the "
                     f"'Pseudo-first (initial drop)' model in Tab 1."
                 )
-            else:
+            elif chk["r2"] >= 0.95:
+                # A missed intercept only means something when the straight line
+                # otherwise fits; on curved data (e.g. Zero-order on any
+                # decelerating run) it fires every time and is noise.
                 st.info(
                     f"ℹ️ {cat_label}: the {mname} linearisation intercept "
                     f"({a:.4g} ± {ci:.4g}) deviates from its theoretical value {expected:.4g}."

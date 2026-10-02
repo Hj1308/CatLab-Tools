@@ -163,3 +163,14 @@ def test_intercept_check_initial_drop_deviates():
     chk = linear_intercept_check(t, y, expected=0.0)
     assert chk["deviates"] is True
     assert chk["intercept"] > 0.0
+
+
+def test_intercept_check_reports_r2():
+    from catlab.metrics import linear_intercept_check
+
+    x = np.array([10.0, 20.0, 40.0, 80.0, 160.0])
+    straight = linear_intercept_check(x, 0.01 * x, 0.0)
+    curved = linear_intercept_check(x, np.sqrt(x), 0.0)
+    assert straight["r2"] > 0.999
+    assert curved["r2"] < straight["r2"]
+    assert np.isnan(linear_intercept_check(x[:2], x[:2], 0.0)["r2"])
