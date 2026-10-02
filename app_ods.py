@@ -45,6 +45,7 @@ from catlab.kinetics_engine import (
     _power_law,
     _avrami,
     _double_exponential,
+    _first_order_drop,
     _r2,
     _fmt_sci,
     _fmt_thalf,
@@ -55,7 +56,14 @@ from catlab.kinetics_engine import (
     _anchor_mask,
 )
 from catlab import __version__
-from catlab.metrics import _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user
+from catlab.metrics import (
+    _C0_both,
+    _initial_tof_site,
+    _initial_tof_mass,
+    _arrhenius_ci,
+    c_to_user,
+    linear_intercept_check,
+)
 
 # Re-exported for backward compatibility (tests/test_app_ods.py).
 from catlab.kinetics_engine import _get_valid_models  # noqa: F401
@@ -283,6 +291,7 @@ models including zero-order compete on equal footing.
 **Model classes:**
 - *Mechanistic*: L-H (surface-reaction based)
 - *Simplified mechanistic*: Zero-, Pseudo-first-, Pseudo-second-order, Power-Law
+- *Semi-empirical*: Pseudo-first (initial drop) — two-stage (fast initial step + first-order)
 - *Phenomenological / empirical*: Elovich (chemisorption heterogeneity),
   Avrami (nucleation/growth — uncommon in ODS; use with caution),
   Double-Exponential (two-site parallel decay — high overfitting risk with < 10 points)
@@ -443,6 +452,8 @@ def _fit_curve(model, params, t_fine, C0):
         return _zero_order(t_fine, params[0], C0)
     elif model == "Pseudo-first":
         return _first_order(t_fine, params[0], C0)
+    elif model == "Pseudo-first (initial drop)":
+        return _first_order_drop(t_fine, params[0], params[1], C0)
     elif model == "Pseudo-second-order":
         return _second_order(t_fine, params[0], C0)
     elif model == "Elovich":
@@ -692,6 +703,21 @@ def _tab_kinetics(cfg, uploaded):
             )
         all_results[col] = _fit_nonlinear(t_fit, Ct_fit, C0)
 
+        # Warn once per catalyst when there are too few informative points for
+        # AICc model selection to be trustworthy (the t=0 anchor is not counted).
+        n_fit = next(
+            (all_results[col][m]["n_fit"] for m in model_names if "n_fit" in all_results[col][m]),
+            None,
+        )
+        if n_fit is not None and n_fit < MIN_FIT_POINTS:
+            cat_label = col.replace(" Removal (%)", "").strip()
+            st.warning(
+                f"⚠️ {cat_label}: only {n_fit} informative data points (t = 0 not counted). "
+                f"With fewer than {MIN_FIT_POINTS} points, AICc penalises every 2-parameter "
+                f"model heavily and cannot evaluate 3-parameter models, so the selected model "
+                f"is not reliable. Add measurements (especially early times, e.g. 5-10 min)."
+            )
+
     if not all_results:
         return
 
@@ -839,6 +865,7 @@ def _tab_kinetics(cfg, uploaded):
             title_lin = f"{cat_label} — Pseudo-second-order  |  1/C vs t"
         elif best in (
             "Pseudo-first",
+            "Pseudo-first (initial drop)",
             "Zero-order",
             "Power-Law",
             "Avrami",
@@ -919,6 +946,7 @@ def _tab_kinetics(cfg, uploaded):
                 "Adj-R²": br.get("adj_r2", "N/A"),
                 "AICc": br.get("aicc", "N/A"),
                 "AIC": br.get("aic", "N/A"),
+                "n (fitted)": br.get("n_fit", ""),
                 "t½ (min)": _fmt_thalf(t_half),
                 "r₀ (mol/L/min)": _fmt_sci(r0),
                 "r₀/m (mol/g/min)": _fmt_sci(r0_m),
@@ -1005,6 +1033,11 @@ def _tab_kinetics(cfg, uploaded):
                             "AICc": mr.get("aicc", "N/A"),
                             "AIC": mr.get("aic", "N/A"),
                             "t½ (min)": _fmt_thalf(mr.get("t_half", float("nan"))),
+                            "Initial drop (%)": (
+                                f"{mr['initial_drop_pct']:.1f}"
+                                if mr.get("initial_drop_pct") is not None
+                                else "–"
+                            ),
                             "Note": note,
                         }
                     )
@@ -1018,6 +1051,7 @@ def _tab_kinetics(cfg, uploaded):
                             "AICc": "–",
                             "AIC": "–",
                             "t½ (min)": "–",
+                            "Initial drop (%)": "–",
                             "Note": note,
                         }
                     )
@@ -1136,6 +1170,58 @@ def _tab_linearization(cfg, uploaded):
         fig.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
+
+    # ── Intercept consistency checks ─────────────────────────────
+    # Each linearised form has a theoretical intercept (Pseudo-first -> 0,
+    # Pseudo-second-order -> 1/C0).  A measured intercept far
+    # from that value signals a model/mechanism mismatch.  The check runs on the
+    # non-anchor points only (t = 0 with C = C0 is fitted exactly by construction).
+    # Zero-order (C vs t -> C0) is not checked: on any decelerating run the
+    # straight line misses C0, which repeats the Pseudo-first warning below.
+    intercept_checks = [
+        (
+            "Pseudo-first",
+            lambda t_, Ct: (t_[Ct > 0], np.log(C0 / np.maximum(Ct[Ct > 0], 1e-15))),
+            0.0,
+        ),
+        ("Pseudo-second-order", lambda t_, Ct: (t_[Ct > 0], 1.0 / Ct[Ct > 0]), 1.0 / C0),
+    ]
+    for col in removal_cols:
+        removal = df[col].dropna().values[: len(t)].astype(float)
+        Ct = C0 * (1 - removal / 100.0)
+        cat_label = col.replace(" Removal (%)", "").strip()
+        keep = ~_anchor_mask(t, Ct, C0)
+        t_nl = t[keep]
+        Ct_nl = Ct[keep]
+        if len(t_nl) < 3:
+            continue
+        for mname, transform, expected in intercept_checks:
+            x_vals, y_vals = transform(t_nl, Ct_nl)
+            if len(x_vals) < 3:
+                continue
+            chk = linear_intercept_check(x_vals, y_vals, expected)
+            if not chk["deviates"]:
+                continue
+            a = chk["intercept"]
+            ci = chk["ci_half"]
+            if mname == "Pseudo-first" and a > 0:
+                x_pct = 100.0 * (1.0 - np.exp(-a))
+                st.warning(
+                    f"⚠️ {cat_label}: the ln(C₀/C) line does not pass through the origin "
+                    f"(intercept = {a:.4g} ± {ci:.4g}). This corresponds to ≈ {x_pct:.0f} % "
+                    f"removed almost instantly at the start (X = 100·(1 − e^(−a))) — a fast "
+                    f"initial step such as rapid adsorption or a fast initial reaction. A "
+                    f"pseudo-first-order curve forced through C₀ will underfit; see the "
+                    f"'Pseudo-first (initial drop)' model in Tab 1."
+                )
+            elif chk["r2"] >= 0.95:
+                # A missed intercept only means something when the straight line
+                # otherwise fits; on curved data (e.g. Zero-order on any
+                # decelerating run) it fires every time and is noise.
+                st.info(
+                    f"ℹ️ {cat_label}: the {mname} linearisation intercept "
+                    f"({a:.4g} ± {ci:.4g}) deviates from its theoretical value {expected:.4g}."
+                )
 
     if not summary_rows:
         return

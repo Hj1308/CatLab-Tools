@@ -14,6 +14,7 @@ from catlab.metrics import (
     _initial_tof_mass,
     _arrhenius_ci,
     c_to_user,
+    linear_intercept_check,
 )
 
 MW_S = 32.06
@@ -110,3 +111,66 @@ def test_c_to_user_mmol_and_gL():
 
 def test_c_to_user_molL_passthrough():
     assert c_to_user(0.001, "mol/L", None) == 0.001
+
+
+# ---- linear_intercept_check ---------------------------------------------
+def test_intercept_check_exact_line_no_deviation():
+    x = np.array([10.0, 20.0, 40.0, 80.0])
+    y = 2.0 * x + 5.0  # exact line, intercept 5 == expected
+    chk = linear_intercept_check(x, y, expected=5.0)
+    assert chk["deviates"] is False
+    assert np.isclose(chk["intercept"], 5.0)
+
+
+def test_intercept_check_offset_intercept_deviates():
+    rng = np.random.default_rng(0)
+    x = np.linspace(1.0, 10.0, 20)
+    y = 2.0 * x + 0.30 + rng.normal(0, 1e-3, x.size)
+    chk = linear_intercept_check(x, y, expected=0.0)
+    assert chk["deviates"] is True
+    assert chk["intercept"] > 0.0
+
+
+def test_intercept_check_two_points_no_deviation():
+    x = np.array([1.0, 2.0])
+    y = np.array([0.3, 0.5])  # any values; n < 3 must give deviates False
+    chk = linear_intercept_check(x, y, expected=0.0)
+    assert chk["deviates"] is False
+    assert np.isnan(chk["intercept"])
+
+
+def test_intercept_check_real_first_order_not_deviating():
+    # Synthetic first-order removal (no fast initial step): the ln(C0/C) line
+    # passes through the origin, so the PFO intercept must not deviate.
+    t = np.array([20.0, 40.0, 80.0, 180.0, 240.0])
+    C0 = 7.798e-3
+    k = 0.008
+    Ct = C0 * np.exp(-k * t)
+    y = np.log(C0 / Ct)
+    chk = linear_intercept_check(t, y, expected=0.0)
+    assert chk["deviates"] is False
+
+
+def test_intercept_check_initial_drop_deviates():
+    # Synthetic data with a fast initial step (~24 % removed instantly) followed
+    # by first-order decay: the ln(C0/C) line does not pass through the origin.
+    t = np.array([20.0, 40.0, 80.0, 180.0, 240.0])
+    C0 = 7.798e-3
+    A = 0.76
+    k = 0.006
+    Ct = A * C0 * np.exp(-k * t)
+    y = np.log(C0 / Ct)
+    chk = linear_intercept_check(t, y, expected=0.0)
+    assert chk["deviates"] is True
+    assert chk["intercept"] > 0.0
+
+
+def test_intercept_check_reports_r2():
+    from catlab.metrics import linear_intercept_check
+
+    x = np.array([10.0, 20.0, 40.0, 80.0, 160.0])
+    straight = linear_intercept_check(x, 0.01 * x, 0.0)
+    curved = linear_intercept_check(x, np.sqrt(x), 0.0)
+    assert straight["r2"] > 0.999
+    assert curved["r2"] < straight["r2"]
+    assert np.isnan(linear_intercept_check(x[:2], x[:2], 0.0)["r2"])

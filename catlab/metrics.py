@@ -59,6 +59,48 @@ def _arrhenius_ci(cov, n_T):
     return Ea_ci, lnA_ci, df
 
 
+def linear_intercept_check(x, y, expected, conf=0.95):
+    """Test whether a linearisation passes through its theoretical intercept.
+
+    Fits y = slope * x + intercept with scipy.stats.linregress and flags the
+    intercept as "deviating" when |intercept - expected| exceeds the confidence
+    half-width t(0.975, n-2) * intercept_stderr.  With fewer than three points
+    there is no valid intercept uncertainty, so deviates is returned False.
+
+    Returns {"intercept", "ci_half", "expected", "deviates", "r2"}; r2 is the
+    R² of the linear fit, so callers can ignore an intercept mismatch on a line
+    that does not fit the data anyway.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(x)
+    if n < 3:
+        return {
+            "intercept": float("nan"),
+            "ci_half": float("nan"),
+            "expected": float(expected),
+            "deviates": False,
+            "r2": float("nan"),
+        }
+    reg = scipy_stats.linregress(x, y)
+    df = n - 2
+    t_crit = scipy_stats.t.ppf(1.0 - (1.0 - conf) / 2.0, df)
+    ci_half = t_crit * reg.intercept_stderr
+    if ci_half == 0 or not np.isfinite(ci_half):
+        # Zero residual: the intercept is known exactly, so a machine-epsilon
+        # offset must not count as a real deviation.
+        deviates = not np.isclose(reg.intercept, expected, rtol=1e-12, atol=1e-15)
+    else:
+        deviates = abs(reg.intercept - expected) > ci_half
+    return {
+        "intercept": float(reg.intercept),
+        "ci_half": float(ci_half),
+        "expected": float(expected),
+        "deviates": bool(deviates),
+        "r2": float(reg.rvalue**2),
+    }
+
+
 def c_to_user(Ct_mol, unit, mw):
     """Convert a concentration from mol/L to the user's display unit."""
     if unit == "ppmS":
