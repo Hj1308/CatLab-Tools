@@ -1,18 +1,22 @@
 # tests/test_app_ods.py
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import sys
+import os
 
-import pytest
-st = pytest.importorskip("streamlit")
-st.set_page_config = lambda *args, **kwargs: None
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import pandas as pd
+import pytest
 from unittest.mock import MagicMock
+
 from scipy import stats as scipy_stats
 
-import app_ods
 from catlab.kinetics_engine import MIN_FIT_POINTS, _first_order
+
+st = pytest.importorskip("streamlit")
+st.set_page_config = lambda *args, **kwargs: None
+
+import app_ods  # noqa: E402  # must be imported after set_page_config is patched
 
 
 class TestRepeatedUploadReads:
@@ -21,24 +25,24 @@ class TestRepeatedUploadReads:
     after the first failed with "Cannot read file: Could not determine
     delimiter".  (Excel was unaffected: openpyxl seeks on its own.)"""
 
-    CSV = (b"Time (min),CatA Removal (%)\n0,0\n15,25\n30,44\n45,58\n"
-           b"60,68\n90,81\n120,88\n")
+    CSV = b"Time (min),CatA Removal (%)\n0,0\n15,25\n30,44\n45,58\n60,68\n90,81\n120,88\n"
 
     class _Upload(__import__("io").BytesIO):
         name = "data.csv"
 
     def test_csv_can_be_read_by_every_tab(self):
         up = self._Upload(self.CSV)
-        for _ in range(9):                      # one read per tab
+        for _ in range(9):  # one read per tab
             df, time_col, removal_cols = app_ods._load_kinetic_data(up)
             assert df is not None and df.shape == (7, 2)
             assert time_col == "Time (min)"
 
     def test_app_csv_upload_has_no_errors_in_any_tab(self):
         from streamlit.testing.v1 import AppTest
+
         at = AppTest.from_file(
-            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"),
-            default_timeout=180).run()
+            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"), default_timeout=180
+        ).run()
         at.file_uploader(key="shared_file").upload("data.csv", self.CSV, "text/csv").run()
         assert not at.exception
         assert not [e.value for e in at.error if "Cannot read file" in e.value]
@@ -46,9 +50,10 @@ class TestRepeatedUploadReads:
     def test_header_shows_package_version(self):
         from streamlit.testing.v1 import AppTest
         import catlab
+
         at = AppTest.from_file(
-            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"),
-            default_timeout=180).run()
+            os.path.join(os.path.dirname(__file__), "..", "app_ods.py"), default_timeout=180
+        ).run()
         assert any(f"v{catlab.__version__}" in m.value for m in at.markdown)
 
 
@@ -56,23 +61,26 @@ class TestTimeUnitSuspicious:
     """The time-column header is checked for non-minute units, without ever
     flagging "Time (min)" itself."""
 
-    @pytest.mark.parametrize("header,expected", [
-        ("Time (min)", False),
-        ("time", False),
-        ("Time (h)", True),
-        ("Time (hr)", True),
-        ("time_hours", True),
-        ("Time (s)", True),
-        ("Time (hrs)", True),
-        ("Time [h]", True),
-        ("t/h", True),
-        ("Time, h", True),
-        ("Time (sec)", True),
-        ("48h", True),
-        ("Time (minutes)", False),
-        ("Reaction time", False),
-        ("Times", False),
-    ])
+    @pytest.mark.parametrize(
+        "header,expected",
+        [
+            ("Time (min)", False),
+            ("time", False),
+            ("Time (h)", True),
+            ("Time (hr)", True),
+            ("time_hours", True),
+            ("Time (s)", True),
+            ("Time (hrs)", True),
+            ("Time [h]", True),
+            ("t/h", True),
+            ("Time, h", True),
+            ("Time (sec)", True),
+            ("48h", True),
+            ("Time (minutes)", False),
+            ("Reaction time", False),
+            ("Times", False),
+        ],
+    )
     def test_header_detection(self, header, expected):
         assert app_ods._time_unit_suspicious(header) is expected
 
@@ -89,7 +97,9 @@ class TestNonConvergedSentinelHandling:
     def test_get_valid_models_skips_nonconverged(self):
         ok = {"R2": 0.99, "aicc": 5.0}
         res = {"Zero-order": self._failed(), "Pseudo-first": ok}
-        assert app_ods._get_valid_models(res, ["Zero-order", "Pseudo-first"]) == {"Pseudo-first": ok}
+        assert app_ods._get_valid_models(res, ["Zero-order", "Pseudo-first"]) == {
+            "Pseudo-first": ok
+        }
 
     def test_best_model_returns_none_when_all_nonconverged(self):
         res = {"Zero-order": self._failed()}
@@ -97,13 +107,12 @@ class TestNonConvergedSentinelHandling:
 
     def test_best_model_excludes_nonconverged_from_competition(self):
         ok_pso = {"R2": 0.95, "aicc": 5.0}
-        ok_fo  = {"R2": 0.90, "aicc": 8.0}
-        res = {"Zero-order": self._failed(),
-               "Pseudo-first": ok_fo,
-               "Pseudo-second-order": ok_pso}
-        assert app_ods._best_model(
-            res, ["Zero-order", "Pseudo-first", "Pseudo-second-order"]
-        ) == "Pseudo-second-order"
+        ok_fo = {"R2": 0.90, "aicc": 8.0}
+        res = {"Zero-order": self._failed(), "Pseudo-first": ok_fo, "Pseudo-second-order": ok_pso}
+        assert (
+            app_ods._best_model(res, ["Zero-order", "Pseudo-first", "Pseudo-second-order"])
+            == "Pseudo-second-order"
+        )
 
     def test_residuals_skips_nonconverged_model_without_keyerror(self, monkeypatch):
         st = MagicMock()
@@ -112,12 +121,17 @@ class TestNonConvergedSentinelHandling:
         st.selectbox.side_effect = ["Cat-A Removal (%)", "Zero-order"]  # catalyst, then model
         monkeypatch.setattr(app_ods, "st", st)
 
-        df = pd.DataFrame({
-            "Time (min)": [0, 5, 10, 15, 20],
-            "Cat-A Removal (%)": [0, 20, 40, 60, 80],
-        })
-        monkeypatch.setattr(app_ods, "_load_kinetic_data",
-                            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]))
+        df = pd.DataFrame(
+            {
+                "Time (min)": [0, 5, 10, 15, 20],
+                "Cat-A Removal (%)": [0, 20, 40, 60, 80],
+            }
+        )
+        monkeypatch.setattr(
+            app_ods,
+            "_load_kinetic_data",
+            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]),
+        )
         all_res = {m: self._failed() for m in app_ods.MODEL_NAMES}
         monkeypatch.setattr(app_ods, "_fit_nonlinear", lambda t, c, C0: all_res)
 
@@ -138,7 +152,7 @@ class TestAutoSaturationDetection:
     Default max_fractional_uptake is 1.0 (disabled); tests pass lower values
     explicitly to exercise the cutoff."""
 
-    T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
+    T = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
     REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 91.0])
 
     @staticmethod
@@ -151,27 +165,30 @@ class TestAutoSaturationDetection:
     def test_drops_all_points_above_cutoff_when_enough_headroom(self):
         """A curve long enough to satisfy the cutoff without hitting the floor:
         every point above the cutoff is dropped and clamped is False."""
-        T   = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+        T = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
         REM = np.array([0.0, 8.0, 16.0, 25.0, 35.0, 50.0, 68.0, 80.0, 91.0])
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            T, REM, max_fractional_uptake=0.85)
+            T, REM, max_fractional_uptake=0.85
+        )
         assert excl == [8, 7]
         assert rem_keep.tolist() == [0.0, 8.0, 16.0, 25.0, 35.0, 50.0, 68.0]
         assert not clamped
 
     def test_cutoff_scales_with_final_removal(self):
         # final = 80 → cutoff 68.0 at 0.85; only the point above it (80) drops.
-        T8   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        T8 = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         rem2 = np.array([0.0, 6.0, 12.0, 25.0, 40.0, 55.0, 68.0, 80.0])
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            T8, rem2, max_fractional_uptake=0.85)
+            T8, rem2, max_fractional_uptake=0.85
+        )
         assert excl == [6]
         assert rem_keep.tolist() == [0.0, 6.0, 12.0, 25.0, 40.0, 55.0, 68.0]
         assert not clamped
 
     def test_lower_cutoff_drops_more_points(self):
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            self.T, self.REM, max_fractional_uptake=0.5)
+            self.T, self.REM, max_fractional_uptake=0.5
+        )
         # cutoff = 45.5 → 50, 68, 80, 91 are all ABOVE it.  The 6 informative
         # points (t=0 is an anchor) already sit at MIN_FIT_POINTS, so nothing
         # can be dropped; the points above the cutoff are retained only because
@@ -183,7 +200,8 @@ class TestAutoSaturationDetection:
 
     def test_max_frac_1_0_disables(self):
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            self.T, self.REM, max_fractional_uptake=1.0)
+            self.T, self.REM, max_fractional_uptake=1.0
+        )
         assert excl == []
         assert t_keep.tolist() == self.T.tolist()
         assert not clamped
@@ -196,11 +214,12 @@ class TestAutoSaturationDetection:
 
     def test_best_model_flips_without_vs_with_exclusion(self):
         c0 = 500.0 / 32.06 / 1000.0
-        T   = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        T = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         REM = np.array([0.0, 16.0, 30.0, 50.0, 68.0, 80.0, 86.0, 91.0])
         best_before, _ = self._best(T, REM, c0)
         excl, t_keep, rem_keep, _ = app_ods._auto_saturation_exclusions(
-            T, REM, max_fractional_uptake=0.85)
+            T, REM, max_fractional_uptake=0.85
+        )
         assert excl == [6]
         best_after, _ = self._best(t_keep, rem_keep, c0)
 
@@ -217,7 +236,8 @@ class TestAutoSaturationDetection:
         Ct_clean = _first_order(T, k, C0)
         rem = 100.0 * (1.0 - Ct_clean / C0)
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            T, rem, max_fractional_uptake=0.90)
+            T, rem, max_fractional_uptake=0.90
+        )
         assert len(rem_keep) >= MIN_FIT_POINTS, f"retained only {len(rem_keep)} points"
         assert clamped
 
@@ -231,9 +251,10 @@ class TestAutoSaturationDetection:
         """
         n = MIN_FIT_POINTS
         rem = 20.0 * np.arange(n, dtype=float)  # [0, 20, ..., 20*(n-1)]
-        T = np.arange(1, n + 1, dtype=float)    # no t=0 anchor: all n informative
+        T = np.arange(1, n + 1, dtype=float)  # no t=0 anchor: all n informative
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            T, rem, max_fractional_uptake=0.5)
+            T, rem, max_fractional_uptake=0.5
+        )
         assert excl == []
         assert clamped
         assert rem_keep.tolist() == rem.tolist()
@@ -242,10 +263,11 @@ class TestAutoSaturationDetection:
     def test_fractional_time_is_reported_exactly(self):
         """Regression: excluded times were cast with int(), so 77.5 min was
         reported as 77.  The excluded value must equal the dropped time."""
-        T   = np.array([0.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 77.5])
+        T = np.array([0.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 77.5])
         REM = np.array([0.0, 10.0, 20.0, 38.0, 52.0, 66.0, 76.0, 90.0])
         excl, t_keep, rem_keep, clamped = app_ods._auto_saturation_exclusions(
-            T, REM, max_fractional_uptake=0.85)
+            T, REM, max_fractional_uptake=0.85
+        )
         assert excl == [77.5]
         assert t_keep.tolist() == [0.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0]
 
@@ -255,7 +277,7 @@ class TestEdgeCaseModels:
     these tests lock in the behavior to prevent regressions."""
 
     C0 = 500.0 / 32.06 / 1000.0  # ~0.01559 mol/L
-    T  = np.array([0, 10, 20, 40, 60, 90, 120, 180, 240, 300.0])
+    T = np.array([0, 10, 20, 40, 60, 90, 120, 180, 240, 300.0])
 
     def test_power_law_n_gt_1_fits_and_produces_valid_curve(self):
         """Power-Law with n=2.0 converges, yields high R², and reproduces
@@ -368,16 +390,24 @@ class TestArrheniusConfidenceInterval:
         st.progress.return_value = MagicMock()
         monkeypatch.setattr(app_ods, "st", st)
 
-        df = pd.DataFrame({
-            "Time (min)": [0, 5, 10, 20],
-            "Cat-A Removal (%)": [0, 20, 40, 60],
-        })
-        monkeypatch.setattr(app_ods, "_load_kinetic_data",
-                            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]))
+        df = pd.DataFrame(
+            {
+                "Time (min)": [0, 5, 10, 20],
+                "Cat-A Removal (%)": [0, 20, 40, 60],
+            }
+        )
+        monkeypatch.setattr(
+            app_ods,
+            "_load_kinetic_data",
+            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]),
+        )
 
         k_iter = iter([0.010, 0.014])
-        monkeypatch.setattr(app_ods, "_fit_nonlinear",
-                            lambda t, Ct, C0: {"Pseudo-first": {"k": next(k_iter), "converged": True}})
+        monkeypatch.setattr(
+            app_ods,
+            "_fit_nonlinear",
+            lambda t, Ct, C0: {"Pseudo-first": {"k": next(k_iter), "converged": True}},
+        )
 
         app_ods._tab_arrhenius({"C0": 0.015})
 
@@ -393,9 +423,9 @@ class TestInitialToFHelpers:
     """
 
     R0 = 1.949470e-04
-    V  = 0.010
+    V = 0.010
     NS = 2.5e-5
-    M  = 0.05
+    M = 0.05
 
     def test_site_helper_arithmetic(self):
         # r0 * V / n_sites = 1.949470e-4 * 0.010 / 2.5e-5 = 0.0779788 min^-1
@@ -424,19 +454,19 @@ class TestInitialToFInvariance:
     one truncated at 50% conversion and one at 90%."""
 
     C0 = 7.7978789769e-3
-    V  = 0.010
+    V = 0.010
     NS = 2.5e-5
-    K  = 0.025
+    K = 0.025
 
     @staticmethod
     def _avg_tof(removal, t_last, C0, V, n_sites):
         X_final = removal[-1] / 100.0
-        n_conv  = C0 * V * X_final
+        n_conv = C0 * V * X_final
         return n_conv / n_sites / t_last
 
     @staticmethod
     def _fit_r0(t, Ct, C0):
-        res  = app_ods._fit_nonlinear(t, Ct, C0)
+        res = app_ods._fit_nonlinear(t, Ct, C0)
         best = app_ods._best_model(res, app_ods.MODEL_NAMES)
         return res[best]["r0"]
 
@@ -464,13 +494,15 @@ class TestInitialToFInvariance:
         assert abs(avg_50 - avg_90) / min(avg_50, avg_90) > 0.50
 
     def test_models_without_initial_rate_give_nan(self):
-        t  = np.array([0.0, 10, 20, 30, 45, 60, 90])
+        t = np.array([0.0, 10, 20, 30, 45, 60, 90])
         Ct = _first_order(t, self.K, self.C0)
         res = app_ods._fit_nonlinear(t, Ct, self.C0)
 
-        no_r0 = [m for m in app_ods.MODEL_NAMES
-                 if m in res and res[m].get("converged", True)
-                 and res[m].get("r0") is None]
+        no_r0 = [
+            m
+            for m in app_ods.MODEL_NAMES
+            if m in res and res[m].get("converged", True) and res[m].get("r0") is None
+        ]
         assert no_r0, "expected at least one converged model with r0=None"
 
         for m in no_r0:
@@ -486,12 +518,17 @@ class TestLinearizationTabNoRanking:
     def test_tab2_shows_r2_table_without_best_model(self, monkeypatch):
         st = MagicMock()
         monkeypatch.setattr(app_ods, "st", st)
-        df = pd.DataFrame({
-            "Time (min)": [0, 10, 20, 30, 45, 60, 90],
-            "Cat-A Removal (%)": [0, 18, 33, 45, 58, 68, 80],
-        })
-        monkeypatch.setattr(app_ods, "_load_kinetic_data",
-                            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]))
+        df = pd.DataFrame(
+            {
+                "Time (min)": [0, 10, 20, 30, 45, 60, 90],
+                "Cat-A Removal (%)": [0, 18, 33, 45, 58, 68, 80],
+            }
+        )
+        monkeypatch.setattr(
+            app_ods,
+            "_load_kinetic_data",
+            lambda uploaded: (df, "Time (min)", ["Cat-A Removal (%)"]),
+        )
 
         app_ods._tab_linearization({"C0": 0.015}, MagicMock())
 

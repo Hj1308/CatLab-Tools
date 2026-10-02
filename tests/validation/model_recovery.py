@@ -98,7 +98,12 @@
 #   # (wall-clock timing is reloaded from .checkpoint_meta.json):
 #   python tests\validation\model_recovery.py --report-only
 
-import os, sys
+import argparse
+import json
+import os
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # BLAS/OpenMP threads are pinned to 1 as a precaution against oversubscription
 # when N workers each spawn their own thread pool.  This is hygiene, not the
@@ -108,56 +113,67 @@ import os, sys
 # completion order) instead of by model name.  Pin every threading knob to 1
 # with ASSIGNMENT (not setdefault) so a caller's environment cannot override
 # it.  Must happen before numpy/scipy.
-for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-           "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+for _v in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
     os.environ[_v] = "1"
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-import json
-import time
-import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-import numpy as np
-from catlab.kinetics_engine import (
-    _fit_nonlinear, _best_model, _auto_saturation_exclusions,
-    _lh_model, _avrami, _power_law,
+import numpy as np  # noqa: E402  # BLAS/OpenMP threads pinned above, before numpy import
+from catlab.kinetics_engine import (  # noqa: E402  # must follow the threading pin above
+    _fit_nonlinear,
+    _best_model,
+    _auto_saturation_exclusions,
+    _lh_model,
+    _avrami,
+    _power_law,
     MODEL_NAMES,
 )
 
-C0 = 7.798e-3          # mol/L (~250 ppmS)
-T  = np.array([0, 15, 30, 45, 60, 90, 120.0])
+C0 = 7.798e-3  # mol/L (~250 ppmS)
+T = np.array([0, 15, 30, 45, 60, 90, 120.0])
 BASE_SEED = 20260812
-N_SEEDS   = 200        # default replicates per archetype (--replicates)
-CUTOFFS   = [1.00, 0.95, 0.90, 0.85, 0.80]
+N_SEEDS = 200  # default replicates per archetype (--replicates)
+CUTOFFS = [1.00, 0.95, 0.90, 0.85, 0.80]
 CUTOFF_KEYS = [f"{c:.2f}" for c in CUTOFFS]
+
 
 # ---- archetypes: params chosen so 70 % <= X_final <= 95 % at t=120 ----
 # Named top-level generators so tasks are picklable by reference.
 def _gen_pso(t, C0, k2):
     return C0 / (1.0 + k2 * C0 * np.maximum(t, 0.0))
 
+
 def _gen_pfo(t, C0, k):
     return C0 * np.exp(-k * np.maximum(t, 0.0))
+
 
 def _gen_pl(t, C0, k, n):
     return _power_law(t, k, n, C0)
 
+
 def _gen_lh(t, C0, kLH, K_ads):
     return _lh_model(t, kLH, K_ads, C0)
+
 
 def _gen_av(t, C0, k_av, n_av):
     return _avrami(t, k_av, n_av, C0)
 
+
 ARCHETYPES = []
+
 
 def _register(name, true_model, family, fn, kwargs):
     Ct = fn(T, C0, **kwargs)
     X_final = (C0 - Ct[-1]) / C0
-    assert 0.70 <= X_final <= 0.95, \
-        f"{name}: final conversion {X_final:.2%} out of [0.70, 0.95]"
+    assert 0.70 <= X_final <= 0.95, f"{name}: final conversion {X_final:.2%} out of [0.70, 0.95]"
     ARCHETYPES.append((name, true_model, family, fn, kwargs))
+
 
 # Pseudo-second-order
 _register("PSO-A", "Pseudo-second-order", "pso", _gen_pso, {"k2": 4.0})
@@ -177,7 +193,7 @@ _register("AV-A", "Avrami", "mech", _gen_av, {"k_av": 0.003, "n_av": 1.4})
 # archetype NAME in this tuple — never of dict/set iteration, a shared counter,
 # or completion order — so results are independent of worker count and order.
 ARCHETYPE_ORDER = tuple(a[0] for a in ARCHETYPES)
-ARCH = {a[0]: a for a in ARCHETYPES}   # name -> (name, truth, family, fn, kwargs)
+ARCH = {a[0]: a for a in ARCHETYPES}  # name -> (name, truth, family, fn, kwargs)
 
 # Clean curve computed once per archetype, reused across replicates.
 CLEAN_CURVES = {a[0]: a[3](T, C0, **a[4]) for a in ARCHETYPES}
@@ -187,7 +203,7 @@ CLEAN_CURVES = {a[0]: a[3](T, C0, **a[4]) for a in ARCHETYPES}
 def apply_noise(rng, Ct_clean):
     sigma = np.maximum(0.03 * Ct_clean, 0.005 * C0)
     Ct = Ct_clean + rng.normal(0.0, sigma)
-    Ct[0] = C0               # C0 locked in fit
+    Ct[0] = C0  # C0 locked in fit
     return np.maximum(Ct, 1e-9)
 
 
@@ -208,32 +224,41 @@ def _task(args):
         Ct_fit = C0 * (1.0 - np.asarray(rk, float) / 100.0)
         res = _fit_nonlinear(np.asarray(tk, float), Ct_fit, C0)
         best = _best_model(res, MODEL_NAMES)
-        cutoffs[ck] = {"best": best, "n_pts": int(len(rk)),
-                       "clamped": bool(clamped)}
-    return {"archetype": name, "replicate": replicate_idx,
-            "cutoffs": cutoffs, "fit_ms": 1000.0 * (time.time() - t0)}
+        cutoffs[ck] = {"best": best, "n_pts": int(len(rk)), "clamped": bool(clamped)}
+    return {
+        "archetype": name,
+        "replicate": replicate_idx,
+        "cutoffs": cutoffs,
+        "fit_ms": 1000.0 * (time.time() - t0),
+    }
 
 
 # ---- checkpoint ---------------------------------------------------------
 def _checkpoint_path(out_dir):
     return os.path.join(out_dir, ".checkpoint.jsonl")
 
+
 def _append_checkpoint(path, rec):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, sort_keys=True) + "\n")
         f.flush()
 
+
 def _maybe_progress(completed, total, t0):
     if completed % 50 == 0 or completed == total:
         elapsed = time.time() - t0
         eta = elapsed / completed * (total - completed) if completed else 0.0
-        print(f"[{completed}/{total}] {100.0*completed/total:.1f}%  "
-              f"elapsed {elapsed:.0f}s  ETA {eta:.0f}s", flush=True)
+        print(
+            f"[{completed}/{total}] {100.0 * completed / total:.1f}%  "
+            f"elapsed {elapsed:.0f}s  ETA {eta:.0f}s",
+            flush=True,
+        )
 
 
 # ---- timing sidecar (wall-clock elapsed, persisted across runs) --------
 def _meta_path(out_dir):
     return os.path.join(out_dir, ".checkpoint_meta.json")
+
 
 def _read_meta(out_dir):
     """Load {"elapsed_s": float, "last_run_utc": str}; None if absent/unreadable."""
@@ -243,10 +268,13 @@ def _read_meta(out_dir):
     try:
         with open(p, encoding="utf-8") as f:
             meta = json.load(f)
-        return {"elapsed_s": float(meta["elapsed_s"]),
-                "last_run_utc": str(meta.get("last_run_utc", ""))}
+        return {
+            "elapsed_s": float(meta["elapsed_s"]),
+            "last_run_utc": str(meta.get("last_run_utc", "")),
+        }
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
 
 def _write_meta(out_dir, elapsed_s, reset=False):
     """Persist wall-clock timing after a real fitting run.
@@ -257,9 +285,10 @@ def _write_meta(out_dir, elapsed_s, reset=False):
     accumulation along with the checkpoint.  last_run_utc is the end of the
     latest invocation that actually fitted."""
     prior = 0.0 if reset else (_read_meta(out_dir) or {}).get("elapsed_s", 0.0)
-    meta = {"elapsed_s": prior + elapsed_s,
-            "last_run_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                          time.gmtime())}
+    meta = {
+        "elapsed_s": prior + elapsed_s,
+        "last_run_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
     with open(_meta_path(out_dir), "w", encoding="utf-8") as f:
         json.dump(meta, f)
 
@@ -293,8 +322,10 @@ def _aggregate(records, replicates, names):
                     mech_ok += 1
                 if cc["best"] == "Pseudo-second-order":
                     false_pso += 1
+
         def _pct(a, b):
             return 100.0 * a / b if b else float("nan")
+
         per_cut[ck] = {
             "overall_pct": _pct(ok, tot),
             "pso_pfo_pct": _pct(pso_ok, pso_tot),
@@ -317,15 +348,15 @@ def _aggregate(records, replicates, names):
         per_arch[name] = {
             "truth": ARCH[name][1],
             "n_completed": len(recs),
-            "recovery_pct": (100.0 * votes.get(ARCH[name][1], 0) / len(recs)
-                             if recs else float("nan")),
+            "recovery_pct": (
+                100.0 * votes.get(ARCH[name][1], 0) / len(recs) if recs else float("nan")
+            ),
             # Total-order sort with an explicit tie-break on the model name.
             # Ties in win counts are common at low replicate counts, and
             # breaking them by dict insertion order (which under as_completed
             # follows task completion order) would make the output depend on
             # worker scheduling.
-            "top3": sorted(votes.items(),
-                           key=lambda kv: (-kv[1], str(kv[0])))[:3],
+            "top3": sorted(votes.items(), key=lambda kv: (-kv[1], str(kv[0])))[:3],
         }
 
     # Timing is wall-clock and therefore non-deterministic; it is kept apart
@@ -334,41 +365,53 @@ def _aggregate(records, replicates, names):
     mean_fit_ms = {}
     for name in names:
         recs = by_arch.get(name, [])
-        mean_fit_ms[name] = (float(np.mean([r["fit_ms"] for r in recs]))
-                             if recs else float("nan"))
+        mean_fit_ms[name] = float(np.mean([r["fit_ms"] for r in recs])) if recs else float("nan")
     ms = [v for v in mean_fit_ms.values() if np.isfinite(v)]
     median_ms = float(np.median(ms)) if ms else float("nan")
-    flagged = [a for a in mean_fit_ms
-               if np.isfinite(mean_fit_ms[a]) and mean_fit_ms[a] > 3.0 * median_ms]
+    flagged = [
+        a for a in mean_fit_ms if np.isfinite(mean_fit_ms[a]) and mean_fit_ms[a] > 3.0 * median_ms
+    ]
 
-    return {"replicates": replicates, "n_tasks_completed": len(records),
-            "per_cutoff": per_cut, "per_archetype": per_arch,
-            "timing": {"median_fit_ms": median_ms,
-                       "per_archetype_mean_fit_ms": mean_fit_ms,
-                       "stiff_archetypes": flagged}}
+    return {
+        "replicates": replicates,
+        "n_tasks_completed": len(records),
+        "per_cutoff": per_cut,
+        "per_archetype": per_arch,
+        "timing": {
+            "median_fit_ms": median_ms,
+            "per_archetype_mean_fit_ms": mean_fit_ms,
+            "stiff_archetypes": flagged,
+        },
+    }
 
 
 # ---- report -------------------------------------------------------------
 def _fmt_pct(x):
     return "n/a" if not np.isfinite(x) else f"{x:.1f}"
 
+
 def _render(agg, elapsed_s, out_dir, names):
     # None = no timing data recorded (e.g. checkpoint predates the sidecar);
     # say so explicitly rather than print a fabricated 0s.
-    wall_clock = ("Wall clock: n/a (no timing data recorded)"
-                  if elapsed_s is None else f"Wall clock: {elapsed_s:.0f}s.")
-    rows = ["# Model Recovery Validation",
-            f"C0 = {C0:.4e} mol/L, N = {agg['replicates']} seeds x "
-            f"{len(names)} archetypes, seed = {BASE_SEED}",
-            f"Paired cutoff sweep: all 5 cutoffs applied to the same noisy "
-            f"dataset per (archetype, replicate). Completed tasks: "
-            f"{agg['n_tasks_completed']}. {wall_clock}",
-            "",
-            "## Per-cutoff sweep (saturation cutoff vs recovery)",
-            "",
-            "| cutoff | overall % | PSO/PFO rec % | mech rec % | "
-            "false-PSO on mech data % | mean n_pts | clamped? |",
-            "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|"]
+    wall_clock = (
+        "Wall clock: n/a (no timing data recorded)"
+        if elapsed_s is None
+        else f"Wall clock: {elapsed_s:.0f}s."
+    )
+    rows = [
+        "# Model Recovery Validation",
+        f"C0 = {C0:.4e} mol/L, N = {agg['replicates']} seeds x "
+        f"{len(names)} archetypes, seed = {BASE_SEED}",
+        f"Paired cutoff sweep: all 5 cutoffs applied to the same noisy "
+        f"dataset per (archetype, replicate). Completed tasks: "
+        f"{agg['n_tasks_completed']}. {wall_clock}",
+        "",
+        "## Per-cutoff sweep (saturation cutoff vs recovery)",
+        "",
+        "| cutoff | overall % | PSO/PFO rec % | mech rec % | "
+        "false-PSO on mech data % | mean n_pts | clamped? |",
+        "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|",
+    ]
     for ck, c in zip(CUTOFF_KEYS, CUTOFFS):
         pc = agg["per_cutoff"][ck]
         clamp_mark = " yes" if pc["n_clamped"] > 0 else ""
@@ -376,57 +419,60 @@ def _render(agg, elapsed_s, out_dir, names):
             f"| {c:.2f} | {_fmt_pct(pc['overall_pct'])} | "
             f"{_fmt_pct(pc['pso_pfo_pct'])} | {_fmt_pct(pc['mech_pct'])} | "
             f"{_fmt_pct(pc['false_pso_pct'])} | {pc['mean_n_pts']:.1f} "
-            f"|{clamp_mark} |")
+            f"|{clamp_mark} |"
+        )
     rows.append("")
-    rows.append("**Buckets:** PSO/PFO = Pseudo-first + Pseudo-second-order "
-                "(simplified, flexible). "
-                "mech = Power-Law + L-H + Avrami (mechanistic). "
-                "Denominator = replicates (N_SEEDS x N_archetypes_in_bucket).")
+    rows.append(
+        "**Buckets:** PSO/PFO = Pseudo-first + Pseudo-second-order "
+        "(simplified, flexible). "
+        "mech = Power-Law + L-H + Avrami (mechanistic). "
+        "Denominator = replicates (N_SEEDS x N_archetypes_in_bucket)."
+    )
     rows.append("")
-    rows.append("**Cutoff sweep granularity:** with only 7 raw time points and "
-                "MIN_FIT_POINTS=6, at most 1 point can ever be excluded before "
-                "clamping — so cutoffs 0.95 through 0.80 are clamped to the same "
-                "retained set and are not independent evidence of a cutoff effect "
-                "on this T array. Only cutoff 1.00 (no exclusion) differs "
-                "meaningfully from the rest here.")
+    rows.append(
+        "**Cutoff sweep granularity:** with only 7 raw time points and "
+        "MIN_FIT_POINTS=6, at most 1 point can ever be excluded before "
+        "clamping — so cutoffs 0.95 through 0.80 are clamped to the same "
+        "retained set and are not independent evidence of a cutoff effect "
+        "on this T array. Only cutoff 1.00 (no exclusion) differs "
+        "meaningfully from the rest here."
+    )
     rows.append("")
     rows.append("## Per-archetype recovery (top-3 selections) | cutoff 1.00")
     rows.append("")
     for name in names:
         pa = agg["per_archetype"][name]
-        top_str = " | ".join(f"{m} ({c}/{pa['n_completed']})"
-                             for m, c in pa["top3"])
-        rows.append(f"| {name} | {pa['truth']} | {pa['recovery_pct']:.1f} % "
-                    f"| {top_str} |")
+        top_str = " | ".join(f"{m} ({c}/{pa['n_completed']})" for m, c in pa["top3"])
+        rows.append(f"| {name} | {pa['truth']} | {pa['recovery_pct']:.1f} % | {top_str} |")
     rows.append("")
     rows.append("## Per-archetype mean fit time")
     rows.append("")
     rows.append("| archetype | mean fit ms |")
     rows.append("|:---:|:---:|")
     for name in names:
-        rows.append(f"| {name} | "
-                    f"{agg['timing']['per_archetype_mean_fit_ms'][name]:.0f} |")
+        rows.append(f"| {name} | {agg['timing']['per_archetype_mean_fit_ms'][name]:.0f} |")
     stiff = agg["timing"]["stiff_archetypes"]
     if stiff:
         rows.append("")
-        rows.append(f"**Stiffness signal:** {', '.join(stiff)} mean fit time "
-                    f"> 3x median ({agg['timing']['median_fit_ms']:.0f} ms) — "
-                    f"recheck their conversion window; do NOT loosen the "
-                    f"odeint tolerances in catlab/.")
+        rows.append(
+            f"**Stiffness signal:** {', '.join(stiff)} mean fit time "
+            f"> 3x median ({agg['timing']['median_fit_ms']:.0f} ms) — "
+            f"recheck their conversion window; do NOT loosen the "
+            f"odeint tolerances in catlab/."
+        )
     md = "\n".join(rows) + "\n"
 
-    with open(os.path.join(out_dir, "model_recovery_results.md"), "w",
-              encoding="utf-8") as f:
+    with open(os.path.join(out_dir, "model_recovery_results.md"), "w", encoding="utf-8") as f:
         f.write(md)
-    with open(os.path.join(out_dir, "results.json"), "w",
-              encoding="utf-8") as f:
+    with open(os.path.join(out_dir, "results.json"), "w", encoding="utf-8") as f:
         json.dump(agg, f, indent=2, sort_keys=True)
     return md
 
 
 # ---- driver -------------------------------------------------------------
-def run(replicates=N_SEEDS, workers=None, out_dir=None,
-        fresh=False, report_only=False, archetypes=None):
+def run(
+    replicates=N_SEEDS, workers=None, out_dir=None, fresh=False, report_only=False, archetypes=None
+):
     names = list(archetypes) if archetypes else list(ARCHETYPE_ORDER)
     for n in names:
         if n not in ARCH:
@@ -450,12 +496,12 @@ def run(replicates=N_SEEDS, workers=None, out_dir=None,
     tasks = [(name, ri) for name in names for ri in range(replicates)]
     pending = [t for t in tasks if t not in done]
     if not report_only and pending:
-        workers = workers if workers is not None \
-            else max(1, (os.cpu_count() or 2) - 1)
+        workers = workers if workers is not None else max(1, (os.cpu_count() or 2) - 1)
         t0 = time.time()
         total = len(pending)
-        print(f"{total} tasks pending, {len(records)} in checkpoint "
-              f"({workers} workers)", flush=True)
+        print(
+            f"{total} tasks pending, {len(records)} in checkpoint ({workers} workers)", flush=True
+        )
         completed = 0
         if workers == 1:
             for t in pending:
@@ -488,21 +534,34 @@ def run(replicates=N_SEEDS, workers=None, out_dir=None,
 
 def main():
     ap = argparse.ArgumentParser(description="Model-recovery validation harness")
-    ap.add_argument("--replicates", type=int, default=N_SEEDS,
-                    help="replicates per archetype (default %(default)s; "
-                         "--replicates 20 = smoke mode)")
-    ap.add_argument("--workers", type=int, default=None,
-                    help="worker processes (default os.cpu_count()-1; use 1 "
-                         "for the determinism check)")
-    ap.add_argument("--archetypes", default=None,
-                    help="comma-separated archetype names to run "
-                         "(default: all, e.g. PSO-A,LH-A)")
-    ap.add_argument("--out", default=None,
-                    help="output directory (default: this script's directory)")
-    ap.add_argument("--fresh", action="store_true",
-                    help="ignore and delete the existing checkpoint")
-    ap.add_argument("--report-only", action="store_true",
-                    help="regenerate the report from the checkpoint, no fitting")
+    ap.add_argument(
+        "--replicates",
+        type=int,
+        default=N_SEEDS,
+        help="replicates per archetype (default %(default)s; --replicates 20 = smoke mode)",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="worker processes (default os.cpu_count()-1; use 1 for the determinism check)",
+    )
+    ap.add_argument(
+        "--archetypes",
+        default=None,
+        help="comma-separated archetype names to run (default: all, e.g. PSO-A,LH-A)",
+    )
+    ap.add_argument(
+        "--out", default=None, help="output directory (default: this script's directory)"
+    )
+    ap.add_argument(
+        "--fresh", action="store_true", help="ignore and delete the existing checkpoint"
+    )
+    ap.add_argument(
+        "--report-only",
+        action="store_true",
+        help="regenerate the report from the checkpoint, no fitting",
+    )
     args = ap.parse_args()
 
     arch_names = None
@@ -510,8 +569,9 @@ def main():
         arch_names = [x.strip() for x in args.archetypes.split(",") if x.strip()]
 
     out_dir = args.out or os.path.dirname(os.path.abspath(__file__))
-    md, _ = run(args.replicates, args.workers, args.out,
-                args.fresh, args.report_only, archetypes=arch_names)
+    md, _ = run(
+        args.replicates, args.workers, args.out, args.fresh, args.report_only, archetypes=arch_names
+    )
     print(md)
     print(f"Saved to {os.path.join(out_dir, 'model_recovery_results.md')}")
 

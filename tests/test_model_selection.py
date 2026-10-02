@@ -1,7 +1,9 @@
 # tests/test_model_selection.py
 # Tests for AICc parameter count, model-selection rules, and Akaike weights.
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import json
 import subprocess
@@ -9,8 +11,13 @@ import subprocess
 import numpy as np
 import pytest
 from catlab.kinetics_engine import (
-    _aic, _aicc, _adj_r2, _best_model, _fit_nonlinear, akaike_weights,
-    N_PARAMS, BEST_MODEL_EXCLUDE, MODEL_NAMES,
+    _aic,
+    _aicc,
+    _best_model,
+    _fit_nonlinear,
+    akaike_weights,
+    N_PARAMS,
+    MODEL_NAMES,
 )
 
 
@@ -36,7 +43,6 @@ class TestAICC:
 
     def test_aicc_infinite_when_underdetermined(self):
         """n=5, p=4 -> K=5 -> n-K-1 = -1 <= 0 -> inf."""
-        n = 5
         y_obs = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         y_pred = np.array([0.11, 0.19, 0.31, 0.39, 0.51])
         p = 4
@@ -52,7 +58,6 @@ class TestAICC:
         y_pred = np.array([0.11, 0.19, 0.31, 0.39, 0.51, 0.59])
         p = 2
         n = 6
-        K = p + 1  # 3
         rss = np.sum((y_obs - y_pred) ** 2)
         aic_part = n * np.log(rss / n)
         # old: 2*p = 4; new: 2*K = 6
@@ -150,8 +155,7 @@ class TestAkaikeWeights:
 
     def test_exclude_honoured(self):
         res = {"A": {"aicc": 1.0}, "Excluded-Model": {"aicc": 2.0}}
-        w = akaike_weights(res, model_names=["A", "Excluded-Model"],
-                           exclude={"Excluded-Model"})
+        w = akaike_weights(res, model_names=["A", "Excluded-Model"], exclude={"Excluded-Model"})
         assert "Excluded-Model" not in w
         assert "A" in w
 
@@ -171,15 +175,14 @@ class TestGroundTruthRecovery:
 
     def test_ground_truth_recovery_pfo(self):
         C0 = 7.798e-3  # mol/L  (~250 ppmS)
-        k_true = 0.02   # 1/min
+        k_true = 0.02  # 1/min
         t = np.array([0, 15, 30, 45, 60, 90, 120.0])
         rng = np.random.default_rng(0)
         wins = {}
         n_rep = 10
         for _ in range(n_rep):
             Ct_clean = C0 * np.exp(-k_true * t)
-            Ct = np.clip(Ct_clean * (1 + rng.normal(0, 0.03, len(t))),
-                         0.001, C0 * 0.999)
+            Ct = np.clip(Ct_clean * (1 + rng.normal(0, 0.03, len(t))), 0.001, C0 * 0.999)
             res = _fit_nonlinear(t, Ct, C0)
             best = _best_model(res, MODEL_NAMES)
             wins[best] = wins.get(best, 0) + 1
@@ -206,16 +209,28 @@ class TestHarnessDeterminism:
     """
 
     def test_parallel_and_serial_identical(self, tmp_path):
-        script = os.path.join(os.path.dirname(__file__),
-                              "validation", "model_recovery.py")
+        script = os.path.join(os.path.dirname(__file__), "validation", "model_recovery.py")
 
         def run_harness(workers, out):
             proc = subprocess.run(
-                [sys.executable, "-u", script,
-                 "--replicates", "3", "--archetypes", "PSO-A,LH-A",
-                 "--workers", str(workers),
-                 "--out", str(out), "--fresh"],
-                capture_output=True, text=True, timeout=1800)
+                [
+                    sys.executable,
+                    "-u",
+                    script,
+                    "--replicates",
+                    "3",
+                    "--archetypes",
+                    "PSO-A,LH-A",
+                    "--workers",
+                    str(workers),
+                    "--out",
+                    str(out),
+                    "--fresh",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1800,
+            )
             assert proc.returncode == 0, proc.stdout + proc.stderr
             with open(out / "results.json", encoding="utf-8") as f:
                 return json.load(f)
@@ -238,18 +253,33 @@ class TestHarnessTimingReport:
 
     @staticmethod
     def _fake_record():
-        return {"archetype": "PSO-A", "replicate": 0, "fit_ms": 1000.0,
-                "cutoffs": {ck: {"best": "Pseudo-second-order",
-                                 "n_pts": 6, "clamped": False}
-                            for ck in ("1.00", "0.95", "0.90", "0.85", "0.80")}}
+        return {
+            "archetype": "PSO-A",
+            "replicate": 0,
+            "fit_ms": 1000.0,
+            "cutoffs": {
+                ck: {"best": "Pseudo-second-order", "n_pts": 6, "clamped": False}
+                for ck in ("1.00", "0.95", "0.90", "0.85", "0.80")
+            },
+        }
 
     def _report_only(self, tmp_path):
-        script = os.path.join(os.path.dirname(__file__),
-                              "validation", "model_recovery.py")
+        script = os.path.join(os.path.dirname(__file__), "validation", "model_recovery.py")
         proc = subprocess.run(
-            [sys.executable, "-u", script, "--report-only",
-             "--out", str(tmp_path), "--archetypes", "PSO-A"],
-            capture_output=True, text=True, timeout=600)
+            [
+                sys.executable,
+                "-u",
+                script,
+                "--report-only",
+                "--out",
+                str(tmp_path),
+                "--archetypes",
+                "PSO-A",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         return proc.stdout
 
@@ -265,8 +295,7 @@ class TestHarnessTimingReport:
 
     def test_sidecar_value_reused(self, tmp_path):
         self._write_checkpoint(tmp_path)
-        with open(tmp_path / ".checkpoint_meta.json", "w",
-                  encoding="utf-8") as f:
+        with open(tmp_path / ".checkpoint_meta.json", "w", encoding="utf-8") as f:
             json.dump({"elapsed_s": 42.0, "last_run_utc": "2026-08-12T22:15:08Z"}, f)
         out = self._report_only(tmp_path)
         assert "Wall clock: 42s." in out

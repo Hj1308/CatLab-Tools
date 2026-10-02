@@ -1,14 +1,21 @@
 # tests/test_anchor.py
 # The (t=0, C0) point is fitted exactly by every model because C0 is locked,
 # so it must not count as data in n, R^2, AICc or the auto-saturation floor.
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from catlab.kinetics_engine import (_fit_nonlinear, _first_order, _anchor_mask,
-                                    _auto_saturation_exclusions, MODEL_NAMES,
-                                    MIN_FIT_POINTS)
+from catlab.kinetics_engine import (
+    _fit_nonlinear,
+    _first_order,
+    _anchor_mask,
+    _auto_saturation_exclusions,
+    MODEL_NAMES,
+    MIN_FIT_POINTS,
+)
 
 C0 = 7.798e-3
 T = np.array([10, 20, 30, 45, 60, 90, 120.0])
@@ -50,7 +57,7 @@ def test_t0_below_c0_is_informative():
 
 def test_saturation_floor_ignores_anchor():
     n = MIN_FIT_POINTS
-    t = np.arange(n + 1, dtype=float)              # t=0 anchor + n informative
+    t = np.arange(n + 1, dtype=float)  # t=0 anchor + n informative
     rem = np.r_[0.0, np.linspace(20, 90, n)]
     excl, _, rem_keep, clamped = _auto_saturation_exclusions(t, rem, 0.5)
     assert excl == [] and clamped

@@ -1,50 +1,96 @@
 # tests/test_catlab.py
 import numpy as np
 import pytest
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from scipy.integrate import odeint
 
 from catlab import (
-    convert_to_mmol_L, SampleInfo, KineticsAnalyser,
-    calc_conversion, calc_tof, calc_toc_removal,
+    convert_to_mmol_L,
+    SampleInfo,
+    KineticsAnalyser,
+    calc_conversion,
+    calc_tof,
+    calc_toc_removal,
+)
+from catlab.kinetics_engine import (
+    _best_model,
+    _fit_nonlinear,
+    akaike_weights,
+    MODEL_NAMES,
 )
 
+
 class TestUnitConverter:
-    def test_mol_L(self):    assert convert_to_mmol_L(1.0, "mol/L") == 1000.0
-    def test_mmol_L(self):   assert convert_to_mmol_L(5.0, "mmol/L") == 5.0
-    def test_ppmS(self):     assert abs(convert_to_mmol_L(500.0, "ppmS") - 500/32.06) < 1e-4
-    def test_mg_L(self):     assert abs(convert_to_mmol_L(180.0, "mg/L", mw=180.0) - 1.0) < 1e-6
-    def test_g_L(self):      assert abs(convert_to_mmol_L(1.0, "g/L", mw=100.0) - 10.0) < 1e-6
+    def test_mol_L(self):
+        assert convert_to_mmol_L(1.0, "mol/L") == 1000.0
+
+    def test_mmol_L(self):
+        assert convert_to_mmol_L(5.0, "mmol/L") == 5.0
+
+    def test_ppmS(self):
+        assert abs(convert_to_mmol_L(500.0, "ppmS") - 500 / 32.06) < 1e-4
+
+    def test_mg_L(self):
+        assert abs(convert_to_mmol_L(180.0, "mg/L", mw=180.0) - 1.0) < 1e-6
+
+    def test_g_L(self):
+        assert abs(convert_to_mmol_L(1.0, "g/L", mw=100.0) - 10.0) < 1e-6
+
     def test_missing_mw(self):
-        with pytest.raises(ValueError): convert_to_mmol_L(50.0, "mg/L")
+        with pytest.raises(ValueError):
+            convert_to_mmol_L(50.0, "mg/L")
+
     def test_unknown_unit(self):
-        with pytest.raises(ValueError): convert_to_mmol_L(1.0, "xyz")
+        with pytest.raises(ValueError):
+            convert_to_mmol_L(1.0, "xyz")
+
 
 class TestSampleInfo:
     def setup_method(self):
-        self.info = SampleInfo("Cat", "desulfurization", 0.05, 0.05, 500.0, "ppmS",
-                               active_sites_mmol_g=0.32)
-    def test_c0_mmol_L(self):      assert abs(self.info.c0_mmol_L - 500/32.06) < 1e-3
-    def test_loading(self):        assert self.info.catalyst_loading_g_L == 1.0
-    def test_n0(self):             assert abs(self.info.n0_mmol - self.info.c0_mmol_L*0.05) < 1e-6
+        self.info = SampleInfo(
+            "Cat", "desulfurization", 0.05, 0.05, 500.0, "ppmS", active_sites_mmol_g=0.32
+        )
+
+    def test_c0_mmol_L(self):
+        assert abs(self.info.c0_mmol_L - 500 / 32.06) < 1e-3
+
+    def test_loading(self):
+        assert self.info.catalyst_loading_g_L == 1.0
+
+    def test_n0(self):
+        assert abs(self.info.n0_mmol - self.info.c0_mmol_L * 0.05) < 1e-6
+
     def test_c0_mmol_L_multi_sulfur(self):
         """c0_mmol_L corrects ppmS to compound basis for di-sulfur substrates."""
-        info2 = SampleInfo("Cat", "desulfurization", 0.05, 0.05, 500.0, "ppmS",
-                           n_sulfur=2)
-        assert abs(info2.c0_S_mmol_L - 500.0/32.06) < 1e-3
-        assert abs(info2.c0_mmol_L - 500.0/32.06/2) < 1e-3
+        info2 = SampleInfo("Cat", "desulfurization", 0.05, 0.05, 500.0, "ppmS", n_sulfur=2)
+        assert abs(info2.c0_S_mmol_L - 500.0 / 32.06) < 1e-3
+        assert abs(info2.c0_mmol_L - 500.0 / 32.06 / 2) < 1e-3
+
 
 class TestKinetics:
     def setup_method(self):
-        info = SampleInfo("MoS2", "desulfurization", 0.05, 0.05, 500.0, "ppmS",
-                          active_sites_mmol_g=0.32)
+        info = SampleInfo(
+            "MoS2", "desulfurization", 0.05, 0.05, 500.0, "ppmS", active_sites_mmol_g=0.32
+        )
         t = np.array([0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
-        c = np.array([convert_to_mmol_L(v, "ppmS") for v in [500,420,350,250,160,100,45]])
+        c = np.array([convert_to_mmol_L(v, "ppmS") for v in [500, 420, 350, 250, 160, 100, 45]])
         self.an = KineticsAnalyser(t, c, info)
-    def test_conversion(self):      assert self.an.full_report()["Conversion X (%)"] > 80
-    def test_best_r2(self):         assert self.an.best_fit()["R2"] > 0.90
-    def test_tof_positive(self):    assert self.an.full_report()["TOF (h\u207b\xb9)"] > 0
-    def test_profile_len(self):     assert len(self.an.conversion_profile()) == 7
+
+    def test_conversion(self):
+        assert self.an.full_report()["Conversion X (%)"] > 80
+
+    def test_best_r2(self):
+        assert self.an.best_fit()["R2"] > 0.90
+
+    def test_tof_positive(self):
+        assert self.an.full_report()["TOF (h\u207b\xb9)"] > 0
+
+    def test_profile_len(self):
+        assert len(self.an.conversion_profile()) == 7
 
     def test_fit_methods_return_real_values_for_good_data(self):
         """Regression for AUD-5: converged-guard must not silently zero-out
@@ -53,8 +99,9 @@ class TestKinetics:
         C0 = 15.59
         t = np.array([0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0])
         Ct = C0 * np.exp(-0.3 * t)
-        info = SampleInfo("Cat", "desulfurization", 0.05, 0.05, C0, "mmol/L",
-                          active_sites_mmol_g=0.32)
+        info = SampleInfo(
+            "Cat", "desulfurization", 0.05, 0.05, C0, "mmol/L", active_sites_mmol_g=0.32
+        )
         ka = KineticsAnalyser(t, Ct, info)
         z = ka.fit_zero_order()
         f = ka.fit_first_order()
@@ -70,11 +117,12 @@ class TestKinetics:
         """AUD-5 regression: explicit converged=False must cause k=0,R2=0."""
         info = SampleInfo("x", "desulfurization", 0.05, 0.05, 15.59, "mmol/L")
         ka = KineticsAnalyser(np.array([0.0, 1.0]), np.array([15.59, 10.0]), info)
-        fake = {"Zero-order": {"converged": False},
-                "Pseudo-first": {"converged": False},
-                "Pseudo-second-order": {"converged": False}}
-        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear",
-                            lambda *a, **kw: fake)
+        fake = {
+            "Zero-order": {"converged": False},
+            "Pseudo-first": {"converged": False},
+            "Pseudo-second-order": {"converged": False},
+        }
+        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear", lambda *a, **kw: fake)
         ka = KineticsAnalyser(np.array([0.0, 1.0]), np.array([15.59, 10.0]), info)
         assert ka.fit_zero_order()["k (mmol/L/h)"] == 0.0
         assert ka.fit_zero_order()["R2"] == 0.0
@@ -90,20 +138,31 @@ class TestConvergedContract:
 
     def test_engine_get_valid_models_defaults_to_true(self):
         from catlab.kinetics_engine import _get_valid_models
+
         ok = {"Pseudo-first": {"R2": 0.99, "aicc": 5.0}}
         assert "Pseudo-first" in _get_valid_models(ok, ["Pseudo-first"])
 
     def test_engine_get_valid_models_rejects_false(self):
         from catlab.kinetics_engine import _get_valid_models
+
         bad = {"Pseudo-first": {"R2": 0.99, "aicc": 5.0, "converged": False}}
         assert "Pseudo-first" not in _get_valid_models(bad, ["Pseudo-first"])
 
+
 class TestHelpers:
-    def test_conversion(self):   assert calc_conversion(100.0, 10.0) == 90.0
-    def test_tof(self):          assert abs(calc_tof(1.0, 0.05, 0.32, 6.0) - 1.0/(0.016*6)) < 0.01
-    def test_toc(self):          assert abs(calc_toc_removal(85.0, 12.0) - 85.88) < 0.1
+    def test_conversion(self):
+        assert calc_conversion(100.0, 10.0) == 90.0
+
+    def test_tof(self):
+        assert abs(calc_tof(1.0, 0.05, 0.32, 6.0) - 1.0 / (0.016 * 6)) < 0.01
+
+    def test_toc(self):
+        assert abs(calc_toc_removal(85.0, 12.0) - 85.88) < 0.1
+
     def test_toc_nan(self):
-        import math; assert math.isnan(calc_toc_removal(0.0, 5.0))
+        import math
+
+        assert math.isnan(calc_toc_removal(0.0, 5.0))
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -114,21 +173,14 @@ class TestHelpers:
 # returned "L-H" with an Akaike weight of ~0.9997 (Zero-order sat at
 # dAICc = 27.52).  These tests pin the two interfaces together.
 # ─────────────────────────────────────────────────────────────────
-from scipy.integrate import odeint
-
-from catlab.kinetics_engine import (
-    _best_model, _fit_nonlinear, akaike_weights, MODEL_NAMES,
-)
-
-
 def _lh_fixture():
     """Synthetic Langmuir-Hinshelwood curve, 2% multiplicative noise."""
-    info = SampleInfo("X", "desulfurization", 0.05, 0.010, 250.0, "ppmS",
-                      active_sites_mmol_g=0.3)
+    info = SampleInfo("X", "desulfurization", 0.05, 0.010, 250.0, "ppmS", active_sites_mmol_g=0.3)
     c0 = info.c0_mmol_L
     t = np.array([0, 5, 10, 20, 30, 45, 60, 90, 120], float)
-    sol = odeint(lambda c, tt: [-0.25 * 0.9 * max(c[0], 0)
-                                / (1 + 0.9 * max(c[0], 0))], [c0], t).flatten()
+    sol = odeint(
+        lambda c, tt: [-0.25 * 0.9 * max(c[0], 0) / (1 + 0.9 * max(c[0], 0))], [c0], t
+    ).flatten()
     rng = np.random.default_rng(7)
     return info, c0, t, sol * (1 + rng.normal(0, 0.02, sol.size))
 
@@ -152,8 +204,15 @@ class TestUnifiedModelSelection:
     def test_best_fit_contract(self):
         info, c0, t, c = _lh_fixture()
         b = KineticsAnalyser(t, c, info).best_fit()
-        for key in ("model", "R2", "aicc", "delta_aicc", "weight",
-                    "n_params", "selection_criterion"):
+        for key in (
+            "model",
+            "R2",
+            "aicc",
+            "delta_aicc",
+            "weight",
+            "n_params",
+            "selection_criterion",
+        ):
             assert key in b, f"missing key {key!r}"
         assert b["selection_criterion"] == "AICc"
         assert b["delta_aicc"] == 0.0
@@ -173,8 +232,7 @@ class TestUnifiedModelSelection:
     def test_all_fits_failed(self, monkeypatch):
         info, c0, t, c = _lh_fixture()
         dead = {m: {"converged": False} for m in MODEL_NAMES}
-        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear",
-                            lambda *a, **kw: dead)
+        monkeypatch.setattr("catlab.catalyst_analytics._fit_nonlinear", lambda *a, **kw: dead)
         b = KineticsAnalyser(t, c, info).best_fit()
         assert b["model"] == "All fits failed"
         assert b["R2"] == 0.0
@@ -231,7 +289,7 @@ class TestLagergrenDiagnostic:
         info = self._info(0.05, 0.05)
         t = np.array([0, 1, 2, 3.0])
         c0 = info.c0_mmol_L
-        c = np.array([c0, 0.5 * c0, 0.2 * c0, 0.4 * c0])   # rises at the end
+        c = np.array([c0, 0.5 * c0, 0.2 * c0, 0.4 * c0])  # rises at the end
         r = KineticsAnalyser(t, c, info).fit_pseudo_first_order()
         assert r["n_points"] < 3
         assert np.isnan(r["k1 (h⁻¹)"]) and np.isnan(r["qe (mmol/g)"])

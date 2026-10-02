@@ -1,10 +1,13 @@
 # tests/test_version.py
-import os, re, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import catlab
 
-ROOT = os.path.join(os.path.dirname(__file__), '..')
+ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def test_package_version_matches_citation_cff():

@@ -1,13 +1,19 @@
 # tests/test_metrics.py
 # Unit tests for catlab/metrics.py — pure scientific helpers.
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from scipy import stats as scipy_stats
 
 from catlab.metrics import (
-    _C0_both, _initial_tof_site, _initial_tof_mass, _arrhenius_ci, c_to_user,
+    _C0_both,
+    _initial_tof_site,
+    _initial_tof_mass,
+    _arrhenius_ci,
+    c_to_user,
 )
 
 MW_S = 32.06
