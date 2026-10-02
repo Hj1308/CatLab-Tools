@@ -148,3 +148,109 @@ class TestTabKinetics:
         assert list(r2_with.index) == list(r2_without.index)
         for cat in r2_with.index:
             assert np.isclose(r2_with[cat], r2_without[cat], rtol=1e-9)
+
+
+# ================================================================
+# STEP 3 — Tabs 2-9
+# ================================================================
+
+
+class TestTabLinearization:
+    def test_linearization_reports_r2_for_each_catalyst(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        for d in app.tabs[1].dataframe:
+            cols = list(d.value.columns)
+            if set(cols) >= {"Catalyst", "Zero-order", "Pseudo-first"}:
+                pivot = d.value
+                assert list(pivot["Catalyst"]) == ["CatA", "CatB"]
+                for model in ["Zero-order", "Pseudo-first", "Pseudo-second-order", "Elovich"]:
+                    assert model in pivot.columns
+                    assert pivot[model].between(0.0, 1.0).all()
+                return
+        pytest.fail("linearization R² pivot table not found")
+
+
+class TestTabRemoval:
+    def test_removal_renders_efficiency_plots(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        imgs = [c for c in app.tabs[2].children.values() if getattr(c, "type", None) == "imgs"]
+        assert len(imgs) >= 2  # efficiency vs time + final-efficiency bar chart
+        assert not app.exception
+
+
+class TestTabTonTof:
+    def test_option_b_shows_mass_normalized_tof(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        app.tabs[3].radio[0].set_value(
+            "Option B — Carbon-based / Metal-free  (mass-normalized TOF)"
+        ).run()
+        tab = app.tabs[3]
+        cols = {c for d in tab.dataframe for c in d.value.columns}
+        assert "TOF_mass_avg (µmol·g⁻¹·min⁻¹)" in cols
+        assert any("Catalyst_Properties" in i.value for i in tab.info)
+
+
+class TestTabParameterEffect:
+    def test_temperature_sweep_reveals_arrhenius_inputs(self, app):
+        app.tabs[4].selectbox[1].set_value("Temperature (Arrhenius)").run()
+        labels = [n.label for n in app.tabs[4].number_input]
+        assert "k at ref T (min⁻¹)" in labels
+        assert "Eₐ (kJ/mol)" in labels
+
+
+class TestTabOxidant:
+    def test_measured_h2o2_reveals_per_catalyst_inputs(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        app.tabs[5].radio[0].set_value("Yes — I will enter measured consumption").run()
+        tab = app.tabs[5]
+        labels = [n.label for n in tab.number_input]
+        assert any("CatA Removal (%)" in label for label in labels)
+        assert any("CatB Removal (%)" in label for label in labels)
+        cols = {c for d in tab.dataframe for c in d.value.columns}
+        assert "η (%)" in cols
+
+
+class TestTabComparison:
+    def test_comparison_uploads_table_and_offers_axes(self, app):
+        cmp = (
+            b"Experiment,T (C),O/S,kapp (1/min),R2\n"
+            b"Run-1,25,2,0.012,0.989\nRun-2,40,4,0.028,0.994\nRun-3,60,6,0.055,0.997\n"
+        )
+        app.file_uploader(key="cmp_upload").upload("cmp.csv", cmp, "text/csv").run()
+        tab = app.tabs[6]
+        assert tab.dataframe and list(tab.dataframe[0].value["Experiment"]) == [
+            "Run-1",
+            "Run-2",
+            "Run-3",
+        ]
+        labels = [s.label for s in tab.selectbox]
+        assert "X axis" in labels and "Y axis" in labels
+
+
+class TestTabArrhenius:
+    def test_arrhenius_extracts_ea_from_two_temperatures(self, app, csv_bytes):
+        app.file_uploader(key="arrhenius_files").set_value(
+            [("t25.csv", csv_bytes, "text/csv"), ("t60.csv", csv_bytes, "text/csv")]
+        ).run()
+        tab = app.tabs[7]
+        tab.number_input(key="arr_T_t25.csv").set_value(25.0)
+        tab.number_input(key="arr_T_t60.csv").set_value(60.0)
+        tab.selectbox(key="arr_model_choice").set_value("Pseudo-first")
+        [b for b in tab.button if "Arrhenius" in str(b.label)][0].click().run()
+        tab = app.tabs[7]
+        assert not tab.error
+        result = tab.dataframe[0].value
+        assert "Eₐ (kJ/mol)" in result.columns
+        assert list(result["n_T"]) == [2, 2]
+
+
+class TestTabResiduals:
+    def test_switching_model_changes_r2_metric(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        tab = app.tabs[8]
+        r2_before = float(tab.metric[0].value)
+        tab.selectbox(key="resid_model").set_value("Pseudo-first").run()
+        r2_after = float(app.tabs[8].metric[0].value)
+        assert r2_before != r2_after
+        assert 0.0 <= r2_before <= 1.0
+        assert 0.0 <= r2_after <= 1.0
