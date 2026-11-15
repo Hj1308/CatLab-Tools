@@ -413,7 +413,19 @@ def _fmt_thalf(val):
     return f"{val:.2f}"
 
 
+def _gum_decimals(u):
+    """Decimal place to which an uncertainty u > 0 is reported (GUM, JCGM 100:2008 7.2.6):
+    two significant digits when the leading digit is 1 or 2, one otherwise. Returns the
+    argument for round(); the value is then rounded to the same place."""
+    e = int(np.floor(np.log10(abs(u))))
+    lead = int(abs(u) / 10**e + 1e-9)
+    n_sig = 2 if lead < 3 else 1
+    return n_sig - 1 - e
+
+
 def _fmt_pm(val, se):
+    """Value ± standard error in scientific form, rounded per GUM: the SE to one or two
+    significant digits, the value to the same decimal place."""
     if val is None or se is None:
         return _fmt_sci(val)
     if np.isnan(val) or np.isnan(se):
@@ -423,7 +435,30 @@ def _fmt_pm(val, se):
     exp = int(np.floor(np.log10(abs(val)))) if val != 0 else 0
     scale = 10**exp
     sup = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
-    return f"({val / scale:.2f} ± {se / scale:.2f}) × 10{str(exp).translate(sup)}"
+    v, u = val / scale, se / scale
+    if u <= 0:
+        return f"({v:.2f} ± 0) × 10{str(exp).translate(sup)}"
+    d = _gum_decimals(u)
+    v_r, u_r = round(v, d), round(u, d)
+    if _gum_decimals(u_r) != d:  # rounding carried into a new digit (e.g. 0.096 -> 0.10)
+        d = _gum_decimals(u_r)
+        v_r, u_r = round(v, d), round(u, d)
+    nd = max(d, 0)
+    return f"({v_r:.{nd}f} ± {u_r:.{nd}f}) × 10{str(exp).translate(sup)}"
+
+
+def fmt_unc(val, u, unit=""):
+    """Plain-notation value ± uncertainty rounded per GUM (see _gum_decimals),
+    e.g. fmt_unc(52.346, 3.21, "kJ/mol") -> "52 ± 3 kJ/mol"."""
+    suffix = f" {unit}" if unit else ""
+    if u is None or val is None or not np.isfinite(u) or not np.isfinite(val) or u <= 0:
+        return f"{val:.4g}{suffix}" if val is not None and np.isfinite(val) else "N/A"
+    d = _gum_decimals(u)
+    u_r = round(u, d)
+    if _gum_decimals(u_r) != d:
+        d = _gum_decimals(u_r)
+    nd = max(d, 0)
+    return f"{round(val, d):.{nd}f} ± {round(u, d):.{nd}f}{suffix}"
 
 
 # -- Non-linear fitting engine -----------------------------------
