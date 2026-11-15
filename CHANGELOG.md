@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Value ± SE is rounded per GUM.** `_fmt_pm` printed every mantissa with two
+  decimals, so an SE of 0.012 showed as ± 0.01 (understated by about 20 %) and a
+  value was quoted beyond its own uncertainty ((4.95 ± 2.49) × 10⁻² instead of
+  (5.0 ± 2.5) × 10⁻²). The SE is now rounded to two significant digits when it
+  starts with 1 or 2 and to one otherwise, and the value to the same decimal place
+  (JCGM 100:2008, 7.2.6). Fitted values are unchanged; the `k (±SE)` text in the
+  Tab 1 tables and in their CSV download now carries the GUM-rounded digits. The
+  Tab 8 Arrhenius title uses the same rule via the new `fmt_unc`.
+
 ## v3.8.0 (2026-10-02)
 
 ### Added

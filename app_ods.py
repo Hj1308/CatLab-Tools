@@ -50,6 +50,7 @@ from catlab.kinetics_engine import (
     _fmt_sci,
     _fmt_thalf,
     _fmt_pm,
+    fmt_unc,
     _fit_nonlinear,
     _best_model,
     _auto_saturation_exclusions,
@@ -2137,7 +2138,7 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
                 ax.set_xlabel("1000/T (K⁻¹)")
                 ax.set_ylabel("ln k")
                 if df_arr >= 1:
-                    title_ea = f"Eₐ = {Ea_kJ:.1f} ± {Ea_ci:.1f} kJ/mol (t, 95% CI)"
+                    title_ea = f"Eₐ = {fmt_unc(Ea_kJ, Ea_ci, 'kJ/mol')} (t, 95% CI)"
                 else:
                     title_ea = f"Eₐ = {Ea_kJ:.1f} kJ/mol (no CI: df = 0)"
                 ax.set_title(f"{cat}\n{title_ea}\nR² = {r2_arr:.4f}")
