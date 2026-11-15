@@ -59,6 +59,10 @@ pip install -r requirements-lock.txt
 | 9 | **Residual Diagnostics** | Shapiro-Wilk, runs test, Q-Q plot, outlier detection |
 | 10 | **Design of Experiments** | Box-Behnken / CCD / 2-level factorial run sheets; quadratic response surface with lack-of-fit, predicted R² and optimum |
 
+**Figure export.** Choose a journal format in the sidebar (*Figure export*) to get
+PDF/TIFF downloads sized to that journal's column width under the main plots.
+Check the journal's own author guidelines before submission.
+
 ---
 
 ## 📐 Kinetic Models (Tab 1)
