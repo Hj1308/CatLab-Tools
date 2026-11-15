@@ -338,3 +338,19 @@ class TestTabDOE:
         assert len(settings) == 1
         temp = float(settings[0].set_index("Factor").loc["Temperature (°C)", "Setting"])
         assert temp == pytest.approx(50 + 20 * 8 / 12, abs=0.5)  # optimum of 8x - 6x^2 at x = 2/3
+
+
+class TestFigureExport:
+    def test_screen_only_has_no_figure_downloads(self, app, csv_bytes):
+        _upload_csv(app, csv_bytes)
+        _run_analysis(app)
+        assert not [b for b in app.get("download_button") if "Figure (PDF)" in str(b.proto.label)]
+
+    def test_journal_format_adds_pdf_and_tiff_downloads(self, app, csv_bytes):
+        app.selectbox(key="fig_journal").set_value("ACS").run()
+        _upload_csv(app, csv_bytes)
+        _run_analysis(app)
+        labels = [str(b.proto.label) for b in app.get("download_button")]
+        assert any("Figure (PDF)" in x for x in labels)
+        assert any("Figure (TIFF)" in x for x in labels)
+        assert not app.exception

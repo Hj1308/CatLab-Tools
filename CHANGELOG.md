@@ -14,6 +14,18 @@
   inside the studied box and reported with a 95 % CI of the mean; an optimum on
   the edge, predicted removal above 100 %, and a response capped near 100 % are
   flagged. Statistics agree with statsmodels OLS and `anova_lm` to 1e-9.
+- **Journal-format figure export.** A sidebar "Figure export" setting (Screen only /
+  ACS / RSC / Elsevier, single or double column; 1.5-column for Elsevier) adds
+  PDF and TIFF downloads under the main plots of Tabs 1, 3, 8, 9 and 10. The
+  download is a copy of the screen figure resized to the printed column width
+  (ACS 8.46 / 17.78 cm, RSC 8.3 / 17.1 cm, Elsevier 9 / 14 / 19 cm), with 7.5 pt
+  text (7 pt tick labels), inward ticks and scaled lines; the PDF keeps text
+  editable and the TIFF is LZW at the journal's resolution (600 dpi ACS/RSC,
+  1000 dpi Elsevier). An automatic check warns about text below the publisher's
+  minimum, bar charts whose axis does not start at 0, and series that would look
+  identical in grayscale. New module `catlab/figures.py`. The figure copy works on
+  matplotlib 3.7–3.11 and on Python 3.14 (whose pickle rejects the `itertools.count`
+  inside categorical-axis units), and CI now runs Python 3.10–3.14.
 
 ### Fixed
 - **Value ± SE is rounded per GUM.** `_fmt_pm` printed every mantissa with two

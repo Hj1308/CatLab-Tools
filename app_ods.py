@@ -58,6 +58,7 @@ from catlab.kinetics_engine import (
 )
 from catlab import __version__
 from catlab import doe
+from catlab import figures
 from catlab.metrics import (
     _C0_both,
     _initial_tof_site,
@@ -205,6 +206,21 @@ def _load_kinetic_data(uploaded):
     return df, time_col, removal_cols
 
 
+def _figure_downloads(fig, cfg, basename):
+    """PDF / TIFF download buttons for `fig` in the journal format chosen in the sidebar."""
+    if not cfg.get("fig_journal"):
+        return
+    res = figures.export_figure(fig, cfg["fig_journal"], cfg["fig_width"])
+    for p in res["problems"]:
+        st.warning(f"Figure check: {p}")
+    tag = f"{basename}_{cfg['fig_journal']}_{cfg['fig_width']}"
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "⬇️ Figure (PDF)", res["pdf"], f"{tag}.pdf", "application/pdf", key=f"pdf_{tag}"
+    )
+    c2.download_button("⬇️ Figure (TIFF)", res["tiff"], f"{tag}.tif", "image/tiff", key=f"tif_{tag}")
+
+
 # ================================================================
 # SIDEBAR — universal settings
 # ================================================================
@@ -298,7 +314,19 @@ models including zero-order compete on equal footing.
   Avrami (nucleation/growth — uncommon in ODS; use with caution),
   Double-Exponential (two-site parallel decay — high overfitting risk with < 10 points)
         """)
+    st.sidebar.subheader("Figure export")
+    fig_journal = st.sidebar.selectbox(
+        "Journal format", ["Screen only", "ACS", "RSC", "Elsevier"], index=0, key="fig_journal"
+    )
+    fig_width = st.sidebar.selectbox(
+        "Column width",
+        ["single", "double"] + (["onehalf"] if fig_journal == "Elsevier" else []),
+        index=0,
+        key="fig_width",
+    )
     return {
+        "fig_journal": None if fig_journal == "Screen only" else fig_journal.lower(),
+        "fig_width": fig_width,
         "substrate_name": substrate_name,
         "mw_poll": mw_poll,
         "n_sulfur": n_sulfur,
@@ -843,6 +871,7 @@ def _tab_kinetics(cfg, uploaded):
     ax.set_title(f"Concentration vs Time — Best Model (AICc){title_note}")
     ax.legend(fontsize=9)
     fig.tight_layout()
+    _figure_downloads(fig, cfg, "kinetics_fit")
     st.pyplot(fig)
     plt.close(fig)
 
@@ -1273,6 +1302,7 @@ def _tab_removal(cfg, uploaded):
     ax.set_ylim(0, 105)
     ax.legend()
     fig.tight_layout()
+    _figure_downloads(fig, cfg, "removal_vs_time")
     st.pyplot(fig)
     plt.close(fig)
     fig2, ax2 = plt.subplots(figsize=(6, 4))
@@ -1290,6 +1320,7 @@ def _tab_removal(cfg, uploaded):
     ax2.set_ylim(0, 115)
     ax2.set_title(f"Desulfurization efficiency at t = {t[-1]:.0f} min")
     fig2.tight_layout()
+    _figure_downloads(fig2, cfg, "removal_bar")
     st.pyplot(fig2)
     plt.close(fig2)
 
@@ -2166,6 +2197,7 @@ Linearised: $\ln k = \ln A - \dfrac{E_a}{R} \cdot \dfrac{1}{T}$
         png_buf = io.BytesIO()
         fig.savefig(png_buf, dpi=300, bbox_inches="tight")
         png_buf.seek(0)
+        _figure_downloads(fig, cfg, f"arrhenius_{cat}")
         st.pyplot(fig)
         plt.close(fig)
         st.subheader("Arrhenius Parameters")
@@ -2362,6 +2394,7 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     ax4.set_title("Standardised Residuals")
     ax4.legend(fontsize=9)
     fig.tight_layout()
+    _figure_downloads(fig, cfg, f"residuals_{cat_choice}_{model_choice}")
     st.pyplot(fig)
     plt.close(fig)
     with st.expander("📊 Compare all models", expanded=False):
@@ -2614,6 +2647,7 @@ def _tab_doe(cfg):
     if len(fac) > 2:
         ax2.set_title("other factors held at the optimum", fontsize=9)
     fig.tight_layout()
+    _figure_downloads(fig, cfg, "doe_surface")
     st.pyplot(fig)
     plt.close(fig)
 
