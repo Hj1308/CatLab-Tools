@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+- **Tab 10 — Design of Experiments.** Generates randomised run sheets for
+  Box-Behnken (3–5 factors), face-centred or rotatable central composite and
+  2-level factorial designs with centre points, in real units with coded columns.
+  The completed sheet is fitted with a linear, interaction or quadratic response
+  surface (`catlab/doe.py`, numpy/scipy only): coefficients ± SE and p in coded
+  units, R², adjusted and predicted R² (PRESS), the model F-test, lack of fit
+  against pure error, and a centre-point curvature test for 2-level designs.
+  Terms the design cannot estimate are dropped and named. The optimum is searched
+  inside the studied box and reported with a 95 % CI of the mean; an optimum on
+  the edge, predicted removal above 100 %, and a response capped near 100 % are
+  flagged. Statistics agree with statsmodels OLS and `anova_lm` to 1e-9.
+
 ### Fixed
 - **Value ± SE is rounded per GUM.** `_fmt_pm` printed every mantissa with two
   decimals, so an SE of 0.012 showed as ± 0.01 (understated by about 20 %) and a

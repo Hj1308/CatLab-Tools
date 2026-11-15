@@ -57,6 +57,7 @@ from catlab.kinetics_engine import (
     _anchor_mask,
 )
 from catlab import __version__
+from catlab import doe
 from catlab.metrics import (
     _C0_both,
     _initial_tof_site,
@@ -2423,6 +2424,200 @@ _Note: with only 5–9 points these tests have low statistical power and are ind
     )
 
 
+DOE_DEFAULT_FACTORS = pd.DataFrame(
+    {
+        "Factor": ["Temperature (°C)", "O/S molar ratio", "Catalyst dosage (g)"],
+        "Low": [30.0, 2.0, 0.01],
+        "High": [70.0, 6.0, 0.05],
+    }
+)
+
+
+def _tab_doe(cfg):
+    st.header("🧭 Tab 10 — Design of Experiments")
+    st.caption(
+        "Plan an optimisation (Box-Behnken, central composite or 2-level factorial), then "
+        "upload the completed run sheet to fit a response surface. Designs: Montgomery, "
+        "*Design and Analysis of Experiments*; Box & Behnken (1960)."
+    )
+    st.subheader("1 · Plan")
+    factors_df = st.data_editor(
+        DOE_DEFAULT_FACTORS, num_rows="dynamic", key="doe_factors", use_container_width=True
+    )
+    c1, c2, c3 = st.columns(3)
+    design = c1.selectbox("Design", list(doe.DESIGNS), index=1, key="doe_design")
+    n_center = c2.number_input("Centre points", 0, 10, 3, key="doe_center")
+    seed = c3.number_input("Randomisation seed", 0, 10**6, 0, key="doe_seed")
+    factors = [
+        (str(r["Factor"]), float(r["Low"]), float(r["High"]))
+        for _, r in factors_df.dropna().iterrows()
+    ]
+    try:
+        plan = doe.make_design(factors, design, int(n_center), int(seed))
+    except ValueError as e:
+        st.error(str(e))
+        plan = None
+    if plan is not None:
+        if design == "CCD (rotatable)":
+            a = doe.ccd_alpha(len(factors), "rotatable")
+            st.info(
+                f"Rotatable CCD: axial runs at ±{a:.3f} in coded units, outside the Low/High "
+                "you entered. Check that those settings are feasible."
+            )
+        if n_center < 2:
+            st.warning("Fewer than 2 centre points: pure error and lack of fit cannot be tested.")
+        st.dataframe(plan, use_container_width=True)
+        st.caption(
+            f"{len(plan)} runs in randomised order (seed {int(seed)}). Run them in the "
+            "'Run' order, fill the response column, and upload the sheet below."
+        )
+        buf = io.BytesIO()
+        plan.to_excel(buf, index=False)
+        st.download_button(
+            "⬇️ Download run sheet (.xlsx)",
+            buf.getvalue(),
+            "doe_run_sheet.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    st.subheader("2 · Analyse")
+    up = st.file_uploader(
+        "Upload the completed run sheet (.xlsx/.csv)", type=["xlsx", "csv"], key="doe_upload"
+    )
+    if up is None:
+        st.info("Upload the run sheet with the response filled in.")
+        return
+    try:
+        up.seek(0)
+        df = pd.read_excel(up) if up.name.endswith(".xlsx") else pd.read_csv(up)
+    except Exception as e:
+        st.error(f"Cannot read file: {e}")
+        return
+    skip = {"Run", "Std order"}
+    numeric = [
+        c
+        for c in df.select_dtypes(include=[np.number]).columns
+        if c not in skip and not str(c).endswith("[coded]")
+    ]
+    if len(numeric) < 3:
+        st.error("Need at least two factor columns and one response column.")
+        return
+    default_resp = next((c for c in numeric if "removal" in str(c).lower()), numeric[-1])
+    response = st.selectbox("Response", numeric, index=numeric.index(default_resp), key="doe_resp")
+    fac = st.multiselect(
+        "Factors",
+        [c for c in numeric if c != response],
+        default=[c for c in numeric if c != response],
+        key="doe_fac",
+    )
+    model = st.selectbox("Model", ["quadratic", "interaction", "linear"], key="doe_model")
+    goal = st.radio("Goal", ["Maximise", "Minimise"], horizontal=True, key="doe_goal")
+    if len(fac) < 2:
+        st.warning("Select at least two factors.")
+        return
+    try:
+        fit = doe.fit_rsm(df, fac, response, model=model)
+    except (ValueError, np.linalg.LinAlgError) as e:
+        st.error(str(e))
+        return
+    for w in fit.warnings:
+        st.warning(w)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("R²", f"{fit.r2:.4f}")
+    m2.metric("Adj-R²", f"{fit.adj_r2:.4f}")
+    m3.metric("Pred-R²", "N/A" if np.isnan(fit.pred_r2) else f"{fit.pred_r2:.4f}")
+    m4.metric("Model p", f"{fit.p_model:.2g}")
+    tab = pd.DataFrame(
+        {
+            "Term": fit.terms,
+            "Coefficient ± SE (coded)": [
+                fmt_unc(c, s) if np.isfinite(s) and s > 0 else f"{c:.4g}"
+                for c, s in zip(fit.coef, fit.se)
+            ],
+            "p": [f"{v:.3g}" for v in fit.p],
+        }
+    )
+    st.dataframe(tab, use_container_width=True)
+    st.caption(
+        "Coefficients refer to coded factors (−1 = Low, +1 = High), so their sizes are "
+        "directly comparable. ± is the standard error."
+    )
+    lof = fit.lack_of_fit
+    if np.isfinite(lof["F"]):
+        msg = (
+            f"Lack of fit: F = {lof['F']:.2f} (df {lof['df_lof']}, {lof['df_pe']}), "
+            f"p = {lof['p']:.3g}."
+        )
+        if lof["p"] < 0.05:
+            st.warning(msg + " The model misses real structure in the data.")
+        else:
+            st.info(msg + " Not significant.")
+    if fit.curvature:
+        st.info(
+            f"Curvature (corners − centre) = {fit.curvature['difference']:.3g}, "
+            f"p = {fit.curvature['p']:.3g}. A significant value means a 2-level design "
+            "cannot locate the optimum; augment it to a CCD."
+        )
+    opt = doe.optimum(fit, fac, maximize=(goal == "Maximise"))
+    lo95, hi95 = opt["ci95"]
+    st.subheader("Predicted optimum")
+    st.dataframe(
+        pd.DataFrame(
+            {"Factor": list(opt["real"]), "Setting": [f"{v:.4g}" for v in opt["real"].values()]}
+        ),
+        use_container_width=True,
+    )
+    st.write(
+        f"Predicted {response}: **{opt['prediction']:.3g}** "
+        f"(95 % CI of the mean {lo95:.3g} to {hi95:.3g}). Confirm it with replicate runs."
+    )
+    if opt["at_boundary"]:
+        st.warning(
+            "The optimum lies on the edge of the studied region for: "
+            + ", ".join(opt["at_boundary"])
+            + ". The true optimum may lie outside; extend the range rather than extrapolate."
+        )
+    if "removal" in str(response).lower() and opt["prediction"] > 100:
+        st.warning("Predicted removal exceeds 100 %: the quadratic model is not valid there.")
+
+    i, j = 0, 1
+    if len(fac) > 2:
+        pair = st.multiselect(
+            "Contour factors", fac, default=fac[:2], max_selections=2, key="doe_pair"
+        )
+        if len(pair) == 2:
+            i, j = fac.index(pair[0]), fac.index(pair[1])
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.2))
+    obs = fit.fitted + fit.resid
+    ax1.scatter(fit.fitted, obs, color="#0072B2", edgecolor="k", lw=0.5)
+    lims = [min(fit.fitted.min(), obs.min()), max(fit.fitted.max(), obs.max())]
+    ax1.plot(lims, lims, "k--", lw=0.8)
+    ax1.set_xlabel(f"Predicted {response}")
+    ax1.set_ylabel(f"Observed {response}")
+    g = np.linspace(-1, 1, 61)
+    G1, G2 = np.meshgrid(g, g)
+    pts = np.tile(opt["coded"], (G1.size, 1))
+    pts[:, i], pts[:, j] = G1.ravel(), G2.ravel()
+    Z = doe.predict(fit, fac, pts)[0].reshape(G1.shape)
+
+    def real_of(idx, c):
+        lo, hi = fit.coding[fac[idx]]
+        return (hi + lo) / 2 + c * (hi - lo) / 2
+
+    X1, X2 = real_of(i, G1), real_of(j, G2)
+    cs = ax2.contourf(X1, X2, Z, levels=12, cmap="viridis")
+    ax2.contour(X1, X2, Z, levels=12, colors="k", linewidths=0.3)
+    fig.colorbar(cs, ax=ax2, label=response)
+    ax2.plot(opt["real"][fac[i]], opt["real"][fac[j]], "w*", ms=12, mec="k")
+    ax2.set_xlabel(fac[i])
+    ax2.set_ylabel(fac[j])
+    if len(fac) > 2:
+        ax2.set_title("other factors held at the optimum", fontsize=9)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 # ================================================================
 # MAIN APP
 # ================================================================
@@ -2457,6 +2652,7 @@ def main():
             "📊 Comparison",
             "🌡️ Arrhenius",
             "🔍 Residuals",
+            "🧭 DOE",
         ]
     )
     with tabs[0]:
@@ -2477,6 +2673,8 @@ def main():
         _tab_arrhenius(cfg)
     with tabs[8]:
         _tab_residuals(cfg, uploaded)
+    with tabs[9]:
+        _tab_doe(cfg)
 
 
 if __name__ == "__main__":

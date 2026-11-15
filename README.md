@@ -57,6 +57,7 @@ pip install -r requirements-lock.txt
 | 7 | **Condition Comparison** | Side-by-side k/t½/r₀ across conditions |
 | 8 | **Arrhenius Analysis** | Multi-temperature Ea & A with 95% confidence intervals |
 | 9 | **Residual Diagnostics** | Shapiro-Wilk, runs test, Q-Q plot, outlier detection |
+| 10 | **Design of Experiments** | Box-Behnken / CCD / 2-level factorial run sheets; quadratic response surface with lack-of-fit, predicted R² and optimum |
 
 ---
 
@@ -274,6 +275,8 @@ CatLab-Tools/
 6. Simonin, J.-P. *Chem. Eng. J.* **2016**, 300, 254. DOI: [10.1016/j.cej.2016.04.079](https://doi.org/10.1016/j.cej.2016.04.079) *(85% fractional-uptake cutoff to reduce artificial PSO dominance in PFO/PSO adsorption studies)*
 7. Kostoglou, M.; Karapantsios, T.D. *Colloids Interfaces* **2022**, 6, 55. DOI: [10.3390/colloids6040055](https://doi.org/10.3390/colloids6040055) *(broader critique of pseudo-second-order artifacts — why the cutoff does not transfer to a multi-model portfolio)*
 8. Grzesik, M.; Szymonski, K. *Ind. Eng. Chem. Res.* **2021**, 60, 8957. DOI: [10.1021/acs.iecr.1c01663](https://doi.org/10.1021/acs.iecr.1c01663) *(comment on PSO misuse)*
+9. Box, G.E.P.; Behnken, D.W. *Technometrics* **1960**, 2, 455–475. *(Box-Behnken designs, Tab 10)*
+10. Montgomery, D.C. *Design and Analysis of Experiments*; Wiley. *(central composite designs, lack-of-fit and curvature tests, PRESS, Tab 10)*
 
 ---
 

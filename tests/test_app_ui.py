@@ -65,8 +65,8 @@ def _upload_xlsx(app, data):
 
 
 class TestSmoke:
-    def test_app_loads_with_nine_tabs(self, app):
-        assert len(app.tabs) == 9
+    def test_app_loads_with_ten_tabs(self, app):
+        assert len(app.tabs) == 10
         assert not app.exception
 
     def test_csv_upload_has_no_errors_in_any_tab(self, app, csv_bytes):
@@ -302,3 +302,39 @@ class TestTabResiduals:
         assert r2_before != r2_after
         assert 0.0 <= r2_before <= 1.0
         assert 0.0 <= r2_after <= 1.0
+
+
+class TestTabDOE:
+    def _sheet(self):
+        from catlab import doe
+
+        d = doe.make_design(
+            [
+                ("Temperature (°C)", 30, 70),
+                ("O/S molar ratio", 2, 6),
+                ("Catalyst dosage (g)", 0.01, 0.05),
+            ],
+            "Box-Behnken",
+            n_center=3,
+            seed=0,
+        )
+        X = d[[c for c in d.columns if c.endswith("[coded]")]].to_numpy(float)
+        d["Removal (%)"] = 70 + 8 * X[:, 0] + 5 * X[:, 1] - 6 * X[:, 0] ** 2 - 4 * X[:, 1] ** 2
+        d.loc[d["Std order"] > 13, "Removal (%)"] += [0.8, -0.6]  # replicate scatter at the centre
+        return d.to_csv(index=False).encode("utf-8")
+
+    def test_default_plan_is_box_behnken_with_15_runs(self, app):
+        plans = [df.value for df in app.dataframe if "Std order" in df.value.columns]
+        assert len(plans) == 1 and len(plans[0]) == 15
+        assert not app.exception
+
+    def test_completed_sheet_gives_fit_and_optimum(self, app):
+        app.file_uploader(key="doe_upload").upload("doe.csv", self._sheet(), "text/csv").run()
+        assert not app.exception
+        assert not app.error
+        labels = [m.label for m in app.metric]
+        assert {"R²", "Adj-R²", "Pred-R²", "Model p"} <= set(labels)
+        settings = [df.value for df in app.dataframe if "Setting" in df.value.columns]
+        assert len(settings) == 1
+        temp = float(settings[0].set_index("Factor").loc["Temperature (°C)", "Setting"])
+        assert temp == pytest.approx(50 + 20 * 8 / 12, abs=0.5)  # optimum of 8x - 6x^2 at x = 2/3
